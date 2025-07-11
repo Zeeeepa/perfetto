@@ -27,11 +27,10 @@ import {
 import {
   SERIALIZED_STATE_VERSION,
   SerializedAppState,
-} from '../core/state_serialization_schema';
+} from '../public/state_serialization_schema';
 import {z} from 'zod';
 import {showModal} from '../widgets/modal';
 import {AppImpl} from '../core/app_impl';
-import {CopyableLink} from '../widgets/copyable_link';
 import {TraceImpl} from '../core/trace_impl';
 
 // Permalink serialization has two layers:
@@ -59,15 +58,17 @@ const PERMALINK_SCHEMA = z.object({
 
 type PermalinkState = z.infer<typeof PERMALINK_SCHEMA>;
 
-export async function createPermalink(trace: TraceImpl): Promise<void> {
-  const hash = await createPermalinkInternal(trace);
-  showPermalinkDialog(hash);
-}
-
-// Returns the file name, not the full url (i.e. the name of the GCS object).
-async function createPermalinkInternal(trace: TraceImpl): Promise<string> {
-  const permalinkData: PermalinkState = {};
-
+/**
+ * Uploads a trace to Google Cloud Storage and returns the URL of the uploaded
+ * trace file.
+ *
+ * @param trace The trace to upload.
+ * @returns The trace URL if the upload was successful, or undefined if the
+ *          trace was already uploaded (i.e. the source type is 'URL').
+ */
+export async function uploadTrace(
+  trace: TraceImpl,
+): Promise<string | undefined> {
   // Check if we need to upload the trace file, before serializing the app
   // state.
   let alreadyUploadedUrl = '';
@@ -89,23 +90,33 @@ async function createPermalinkInternal(trace: TraceImpl): Promise<string> {
   // Internally TraceGcsUploader will skip the upload if an object with the
   // same hash exists already.
   if (alreadyUploadedUrl) {
-    permalinkData.traceUrl = alreadyUploadedUrl;
+    return alreadyUploadedUrl;
   } else if (dataToUpload !== undefined) {
     updateStatus(`Uploading ${traceName}`);
-    const uploader: GcsUploader = new GcsUploader(dataToUpload, {
+    const uploader = new GcsUploader(dataToUpload, {
       mimeType: MIME_BINARY,
       onProgress: () => reportUpdateProgress(uploader),
     });
     await uploader.waitForCompletion();
-    permalinkData.traceUrl = uploader.uploadedUrl;
+    return uploader.uploadedUrl;
   }
 
-  permalinkData.appState = serializeAppState(trace);
+  return undefined;
+}
+
+export async function createPermalink(
+  trace: TraceImpl,
+  traceUrl: string | undefined,
+): Promise<string> {
+  const permalinkData: PermalinkState = {
+    traceUrl,
+    appState: serializeAppState(trace),
+  };
 
   // Serialize the permalink with the app state (or recording state) and upload.
   updateStatus(`Creating permalink...`);
   const permalinkJson = JsonSerialize(permalinkData);
-  const uploader: GcsUploader = new GcsUploader(permalinkJson, {
+  const uploader = new GcsUploader(permalinkJson, {
     mimeType: MIME_JSON,
     onProgress: () => reportUpdateProgress(uploader),
   });
@@ -153,14 +164,18 @@ export async function loadPermalink(gcsFileName: string): Promise<void> {
     // This is the most common case where the permalink contains the app state
     // (and optionally a traceUrl, below).
     const parseRes = parseAppState(permalink.appState);
-    if (parseRes.success) {
-      serializedAppState = parseRes.data;
+    if (parseRes.ok) {
+      serializedAppState = parseRes.value;
     } else {
       error = parseRes.error;
     }
   }
   if (permalink.traceUrl) {
-    AppImpl.instance.openTraceFromUrl(permalink.traceUrl, serializedAppState);
+    AppImpl.instance.openTrace({
+      type: 'URL',
+      url: permalink.traceUrl,
+      serializedAppState,
+    });
   }
 
   if (error) {
@@ -238,11 +253,4 @@ function reportUpdateProgress(uploader: GcsUploader) {
 
 function updateStatus(msg: string): void {
   AppImpl.instance.omnibox.showStatusMessage(msg);
-}
-
-function showPermalinkDialog(hash: string) {
-  showModal({
-    title: 'Permalink',
-    content: m(CopyableLink, {url: `${self.location.origin}/#!/?s=${hash}`}),
-  });
 }

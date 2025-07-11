@@ -47,8 +47,7 @@ import {createProxy} from '../base/utils';
 import {PageManagerImpl} from './page_manager';
 import {FeatureFlagManager, FlagSettings} from '../public/feature_flag';
 import {featureFlags} from './feature_flags';
-import {SerializedAppState} from './state_serialization_schema';
-import {PostedTrace} from './trace_source';
+import {TraceSource} from '../public/trace_source';
 import {PerfManager} from './perf_manager';
 import {EvtSource} from '../base/events';
 import {Raf} from '../public/raf';
@@ -445,16 +444,8 @@ export class TraceImpl implements Trace {
     this.appImpl.navigate(newHash);
   }
 
-  openTraceFromFile(file: File): void {
-    this.appImpl.openTraceFromFile(file);
-  }
-
-  openTraceFromUrl(url: string, serializedAppState?: SerializedAppState) {
-    this.appImpl.openTraceFromUrl(url, serializedAppState);
-  }
-
-  openTraceFromBuffer(args: PostedTrace): void {
-    this.appImpl.openTraceFromBuffer(args);
+  openTrace(source: TraceSource): void {
+    this.appImpl.openTrace(source);
   }
 
   closeCurrentTrace(): void {

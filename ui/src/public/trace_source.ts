@@ -38,16 +38,15 @@ export interface TraceHttpRpcSource {
   type: 'HTTP_RPC';
 }
 
-export interface TraceArrayBufferSource extends PostedTrace {
+export interface TraceArrayBufferSource {
   type: 'ARRAY_BUFFER';
-  // See PostedTrace (which this interface extends).
-}
 
-export interface PostedTrace {
   buffer: ArrayBuffer;
   title: string;
   fileName?: string;
   url?: string;
+
+  serializedAppState?: SerializedAppState;
 
   // |uuid| is set only when loading via ?local_cache_key=1234. When set,
   // this matches global.state.traceUuid, with the exception of the following
@@ -59,7 +58,6 @@ export interface PostedTrace {
 
   // if |localOnly| is true then the trace should not be shared or downloaded.
   localOnly?: boolean;
-  keepApiOpen?: boolean;
 
   // Allows to pass extra arguments to plugins. This can be read by plugins
   // onTraceLoad() and can be used to trigger plugin-specific-behaviours (e.g.
