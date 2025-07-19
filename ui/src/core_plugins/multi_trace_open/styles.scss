@@ -1,0 +1,245 @@
+// Copyright (C) 2025 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+@mixin pf-multi-trace-modal--flex-center($justify: flex-start) {
+  display: flex;
+  align-items: center;
+  justify-content: $justify;
+}
+
+.pf-multi-trace-modal {
+  $border-color-light: #eee;
+  $border-color-medium: #ccc;
+  $text-color-primary: #333;
+  $text-color-secondary: rgba(0, 0, 0, 0.6);
+  $text-color-tertiary: #666;
+  $text-color-hint: #999;
+  $status-color-analyzed: #4caf50;
+  $status-color-error: #d9534f;
+  $status-color-neutral: $border-color-medium;
+  $bg-color-empty: rgba(0, 0, 0, 0.05);
+  $bg-color-empty-hover: rgba(0, 0, 0, 0.08);
+  $bg-color-add-card: #fafafa;
+  $bg-color-add-card-hover: #f0f0f0;
+  $bg-color-info-panel: #f5f9ff;
+  $primary-color: var(--primary-color, #3e8ad3);
+  $primary-color-transparent: rgba(62, 138, 211, 0.1);
+  $primary-color-border: rgba(62, 138, 211, 0.3);
+
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 800px;
+  max-height: 80vh;
+  overflow: auto;
+
+  &__subtitle {
+    margin-top: 16px;
+    padding: 16px 16px 8px;
+    color: $text-color-tertiary;
+    font-size: 0.9em;
+    border-top: 1px solid $border-color-light;
+    padding-top: 16px;
+
+    strong {
+      font-weight: 600;
+    }
+  }
+
+  footer {
+    @include pf-multi-trace-modal--flex-center(flex-end);
+    padding: 16px;
+    margin-top: 12px;
+    border-top: 1px solid $border-color-light;
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 2px;
+
+    > .pf-card {
+      margin-bottom: 4px;
+    }
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  &__card-content {
+    @include pf-multi-trace-modal--flex-center(flex-start);
+    padding: 2px;
+  }
+
+  &__trace-details {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+  }
+
+  &__info,
+  &__meta {
+    @include pf-multi-trace-modal--flex-center(flex-start);
+    gap: 8px;
+  }
+
+  &__name {
+    flex-grow: 1;
+    color: $text-color-primary;
+    font-size: 0.95em;
+    font-weight: 600;
+    word-break: break-word;
+  }
+
+  &__size,
+  &__status,
+  &__format {
+    @include pf-multi-trace-modal--flex-center;
+    flex-shrink: 0;
+    color: $text-color-secondary;
+    font-size: 0.9em;
+  }
+
+  &__status-wrapper {
+    @include pf-multi-trace-modal--flex-center;
+    gap: 4px;
+  }
+
+  &__status {
+    &::before {
+      content: '';
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      margin-right: 6px;
+      border-radius: 50%;
+      background-color: $status-color-neutral;
+    }
+
+    &--analyzed::before {
+      background-color: $status-color-analyzed;
+    }
+
+    &--analyzing::before {
+      width: 12px;
+      height: 12px;
+      border: 2px solid $primary-color-border;
+      border-top: 2px solid $primary-color;
+      background-color: transparent;
+      animation: spin 1s linear infinite;
+    }
+
+    &--error::before {
+      background-color: $status-color-error;
+    }
+  }
+
+  .pf-hint {
+    margin-left: 0px;
+    color: $text-color-hint;
+    font-size: 1.2em;
+  }
+
+  &__analyzing {
+    @include pf-multi-trace-modal--flex-center(center);
+    padding: 12px;
+    margin-bottom: 12px;
+    border-radius: 6px;
+    background-color: $primary-color-transparent;
+
+    &::before {
+      content: '';
+      width: 16px;
+      height: 16px;
+      margin-right: 12px;
+      border: 2px solid $primary-color-border;
+      border-top: 2px solid $primary-color;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+  }
+
+  &__actions {
+    @include pf-multi-trace-modal--flex-center;
+    gap: 12px;
+    margin-left: 16px;
+  }
+
+  &__add-card {
+    border: 1px dashed $border-color-medium;
+    background-color: $bg-color-add-card;
+    cursor: pointer;
+    padding: 0;
+
+    &:hover {
+      background: $bg-color-add-card-hover;
+    }
+  }
+
+  &__add-card-content {
+    @include pf-multi-trace-modal--flex-center(center);
+    gap: 4px;
+    padding: 2px;
+    color: $text-color-tertiary;
+    font-family: 'Roboto', sans-serif;
+    font-size: 0.9em;
+    font-weight: bold;
+  }
+
+  &__status-tooltip {
+    padding: 8px;
+  }
+
+  &__open-traces-tooltip {
+    padding: 8px;
+  }
+
+  &__format {
+    gap: 4px;
+  }
+
+  &__format-label {
+    font-weight: 600;
+  }
+
+  &__clock-select {
+    min-width: 200px;
+  }
+}
+
+.pf-multi-trace-modal-override main {
+  margin-top: 0;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
