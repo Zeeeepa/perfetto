@@ -20,7 +20,7 @@ import {Card} from '../../widgets/card';
 import {Intent} from '../../widgets/common';
 import {Icon} from '../../widgets/icon';
 import {PopupPosition} from '../../widgets/popup';
-import {Select} from '../../widgets/select';
+import {MenuItem, PopupMenu} from '../../widgets/menu';
 import {Tooltip} from '../../widgets/tooltip';
 import {TraceFileStream} from '../../core/trace_stream';
 import {WasmEngineProxy} from '../../trace_processor/wasm_engine_proxy';
@@ -91,6 +91,10 @@ function getStatusInfo(status: TraceStatus) {
   }
 }
 
+function getClockName(clock: Clock): string {
+  return clock.clock_name ?? `Clock Id: ${clock.clock_id}`;
+}
+
 type TraceStatus = 'not-analyzed' | 'analyzing' | 'analyzed' | 'error';
 
 interface Clock {
@@ -141,8 +145,8 @@ class MultiTraceModalComponent
       '.pf-multi-trace-modal',
       m(
         '.pf-multi-trace-modal__subtitle',
-        m('strong', 'Step 1:'),
-        ' Select the primary clock for each trace. This is the clock that all other timestamps in that trace are relative to.',
+        m('strong', 'Step 1: '),
+        'Configure properties for each trace. The primary clock for each trace is chosen from the trace metadata if available, or by a heuristic.',
       ),
       this.traces.length === 0 ? this.renderEmpty() : this.renderTraceList(),
       m(
@@ -200,7 +204,7 @@ class MultiTraceModalComponent
       nodes.map((node) =>
         m(
           '.graph-node',
-          `${node.trace.file.name}: ${node.clock.clock_name}`,
+          `${node.trace.file.name}: ${getClockName(node.clock)}`,
           this.rootClock === node ? m('span', ' (Root)') : '',
           m(Button, {
             label: 'Set as Root',
@@ -224,13 +228,13 @@ class MultiTraceModalComponent
       links.map((link) =>
         m(
           '.graph-link',
-          `Auto Link: ${link.source.clock.clock_name} (${link.source.trace.file.name}) -> ${link.target.clock.clock_name} (${link.target.trace.file.name})`,
+          `Auto Link: ${getClockName(link.source.clock)} (${link.source.trace.file.name}) -> ${getClockName(link.target.clock)} (${link.target.trace.file.name})`,
         ),
       ),
       this.manualLinks.map((link, index) =>
         m(
           '.graph-link',
-          `Manual Link: ${link.source.clock.clock_name} (${link.source.trace.file.name}) -> ${link.target.clock.clock_name} (${link.target.trace.file.name})`,
+          `Manual Link: ${getClockName(link.source.clock)} (${link.source.trace.file.name}) -> ${getClockName(link.target.clock)} (${link.target.trace.file.name})`,
           m(Button, {
             label: 'Delete',
             onclick: () => {
@@ -299,14 +303,25 @@ class MultiTraceModalComponent
     return m('.pf-multi-trace-modal__meta', [
       m(
         '.pf-multi-trace-modal__size',
-        `${(trace.file.size / (1024 * 1024)).toFixed(1)} MB`,
+        m('span.pf-multi-trace-modal__size-label', 'Size:'),
+        m(
+          'span.pf-multi-trace-modal__size-value',
+          `${(trace.file.size / (1024 * 1024)).toFixed(1)} MB`,
+        ),
       ),
-      trace.status === 'analyzed' && trace.format ?
+      trace.status === 'analyzed' && trace.format ? [
         m(
             '.pf-multi-trace-modal__format',
             m('span.pf-multi-trace-modal__format-label', 'Format:'),
             m('span.pf-multi-trace-modal__format-value', trace.format),
-            ) :
+            ),
+        m(
+            '.pf-multi-trace-modal__clock-display',
+            m('.pf-multi-trace-modal__clock-name', 'Primary clock:'),
+            m('.pf-multi-trace-modal__clock-value',
+              getClockName(this.primaryClocks.get(trace)!)),
+            ),
+      ]:
         this.renderTraceStatus(trace),
     ]);
   }
@@ -315,33 +330,20 @@ class MultiTraceModalComponent
     const trace = this.traces[index];
     return m(
       '.pf-multi-trace-modal__actions',
-      trace.status === 'analyzed' &&
-        trace.clocks &&
-        m(Select, {
-          className: 'pf-multi-trace-modal__clock-select',
-          onchange: (e: Event) => {
-            const target = e.target as HTMLSelectElement;
-            const clock = trace.clocks!.find(
-              (c) => c.clock_id === Number(target.value),
-            );
-            if (clock) {
+      trace.status === 'analyzed' && trace.clocks && m(PopupMenu, {
+        className: 'pf-multi-trace-modal__clock-popup',
+        trigger: m(Button, {icon: 'edit', compact: true}),
+      },
+        m(MenuItem, {label: 'Primary clock'},
+          ...trace.clocks.map((clock) => m(MenuItem, {
+            label: getClockName(clock),
+            onclick: () => {
               this.primaryClocks.set(trace, clock);
               redrawModal();
-            }
-          },
-          value: this.primaryClocks.get(trace)?.clock_id ?? '',
-        }, [
-          m('option', {value: ''}, 'Select primary clock'),
-          ...trace.clocks.map((clock) =>
-            m(
-              'option',
-              {
-                value: clock.clock_id,
-              },
-              clock.clock_name,
-            ),
+            },
+          })),
           ),
-        ]),
+        ),
       m(Button, {
         icon: 'delete',
         onclick: () => this.removeTrace(index),
@@ -517,6 +519,28 @@ class MultiTraceModalComponent
           });
         }
         trace.clocks = clocks;
+
+        const defaultClockIdResult = await engine.query(`
+          SELECT int_value FROM metadata WHERE name = 'trace_time_clock_id'
+        `);
+        const defaultClockIdIt =
+          defaultClockIdResult.iter({int_value: NUM});
+
+        let defaultClock: Clock|undefined = undefined;
+        if (defaultClockIdIt.valid()) {
+          const defaultClockId = defaultClockIdIt.int_value;
+          defaultClock =
+            trace.clocks.find((c) => c.clock_id === defaultClockId);
+        }
+
+        // Fallback to the first clock if no default is found
+        if (!defaultClock && trace.clocks.length > 0) {
+          defaultClock = trace.clocks[0];
+        }
+
+        if (defaultClock) {
+          this.primaryClocks.set(trace, defaultClock);
+        }
       } else {
         // This case should ideally not be reached with a valid trace
         trace.status = 'error';

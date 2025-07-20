@@ -115,13 +115,20 @@
     word-break: break-word;
   }
 
-  &__size,
   &__status,
   &__format {
     @include pf-multi-trace-modal--flex-center;
     flex-shrink: 0;
     color: $text-color-secondary;
     font-size: 0.9em;
+  }
+
+  &__size {
+    @include pf-multi-trace-modal--flex-center;
+    flex-shrink: 0;
+    color: $text-color-secondary;
+    font-size: 0.9em;
+    gap: 4px;
   }
 
   &__status-wrapper {
@@ -222,12 +229,31 @@
     gap: 4px;
   }
 
-  &__format-label {
+  &__format-label,
+  &__size-label {
     font-weight: 600;
   }
 
-  &__clock-select {
-    min-width: 200px;
+  &__clock-display {
+    @include pf-multi-trace-modal--flex-center;
+    gap: 4px;
+  }
+
+  &__clock-name,
+  &__clock-value {
+    color: $text-color-secondary;
+    font-size: 0.9em;
+  }
+
+  &__clock-name {
+    font-weight: 600;
+  }
+
+  &__clock-popup {
+    .pf-menu {
+      max-height: 150px;
+      overflow-y: auto;
+    }
   }
 }
 
