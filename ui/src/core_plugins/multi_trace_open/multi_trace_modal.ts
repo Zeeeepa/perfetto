@@ -90,6 +90,13 @@ function getStatusInfo(status: TraceStatus) {
   }
 }
 
+function areAllTracesAnalyzed(traces: TraceFile[]): boolean {
+  return traces.every((trace) => trace.status === 'analyzed');
+}
+
+function isAnalyzing(traces: TraceFile[]): boolean {
+  return traces.some((trace) => trace.status === 'analyzing');
+}
 
 type TraceStatus = 'not-analyzed' | 'analyzing' | 'analyzed' | 'error';
 
@@ -109,6 +116,7 @@ class MultiTraceModalComponent
   implements m.ClassComponent<MultiTraceModalAttrs>
 {
   private traces: TraceFile[] = [];
+  private selectedTrace?: TraceFile;
 
   // Lifecycle
   oncreate({attrs}: m.Vnode<MultiTraceModalAttrs>) {
@@ -120,36 +128,44 @@ class MultiTraceModalComponent
   view() {
     // This state should not be reachable. If we are analyzing, we should
     // have traces.
-    assertFalse(this.isAnalyzing() && this.traces.length === 0);
+    assertFalse(isAnalyzing(this.traces) && this.traces.length === 0);
 
     return m(
       '.pf-multi-trace-modal',
-      this.traces.length === 0 ? this.renderEmpty() : this.renderTraceList(),
+      m(
+        '.pf-multi-trace-modal__main',
+        m(
+          '.pf-multi-trace-modal__list-panel',
+          this.traces.map((trace, index) => this.renderTraceItem(trace, index)),
+          this.renderAddTracesButton(),
+        ),
+        m('.pf-multi-trace-modal__details-panel', this.renderDetailsPanel()),
+      ),
       m('footer', this.renderActions()),
     );
   }
 
   // Main Renderers
-  private renderEmpty() {
-    return this.renderAddTracesButton();
-  }
-
-  private renderTraceList() {
+  private renderDetailsPanel() {
+    if (!this.selectedTrace) {
+      return m(
+        '.pf-multi-trace-modal__details-placeholder',
+        'Select a trace to see details',
+      );
+    }
     return m(
-      '.pf-multi-trace-modal__list',
-      this.traces.map((trace, index) => this.renderTraceItem(trace, index)),
-      this.renderAddTracesButton(),
+      '.pf-multi-trace-modal__details-content',
+      m('h3', this.selectedTrace.file.name),
+      // TODO(stevegolton): Add more details here
     );
   }
 
   private renderActions() {
     const isDisabled =
-      !this.areAllTracesAnalyzed() || this.traces.length === 0;
-
+      !areAllTracesAnalyzed(this.traces) || this.traces.length === 0;
     if (!isDisabled) {
       return this.renderOpenTracesButton(false);
     }
-
     return m(
       Tooltip,
       {
@@ -166,12 +182,10 @@ class MultiTraceModalComponent
       Card,
       {
         key: trace.file.name,
+        className: 'pf-multi-trace-modal__card',
       },
-      m(
-        '.pf-multi-trace-modal__card-content',
-        this.renderTraceInfo(trace),
-        this.renderCardActions(index),
-      ),
+      this.renderTraceInfo(trace),
+      this.renderCardActions(trace, index),
     );
   }
 
@@ -203,35 +217,39 @@ class MultiTraceModalComponent
   private renderTraceInfo(trace: TraceFile) {
     return m(
       '.pf-multi-trace-modal__info',
+      m(MiddleEllipsis, {
+        text: trace.file.name,
+        className: 'pf-multi-trace-modal__name',
+      }),
       m(
-        '.pf-multi-trace-modal__name',
-        m(MiddleEllipsis, {text: trace.file.name}),
-      ),
-      m(
-        '.pf-multi-trace-modal__size',
-        m('strong', 'Size:'),
+        '.pf-multi-trace-modal__summary',
         m(
-          'span',
-          `${(trace.file.size / (1024 * 1024)).toFixed(1)} MB`,
+          '.pf-multi-trace-modal__size',
+          m('strong', 'Size:'),
+          m('span', `${(trace.file.size / (1024 * 1024)).toFixed(1)} MB`),
         ),
+        trace.status === 'analyzed' && trace.format
+          ? m(
+              '.pf-multi-trace-modal__format',
+              m('strong', 'Format:'),
+              m('span', trace.format),
+            )
+          : this.renderTraceStatus(trace),
       ),
-      trace.status === 'analyzed' && trace.format ?
-        m(
-            '.pf-multi-trace-modal__format',
-            m('strong', 'Format:'),
-            m('span', trace.format),
-            ) :
-        this.renderTraceStatus(trace),
     );
   }
 
-  private renderCardActions(index: number) {
+  private renderCardActions(trace: TraceFile, index: number) {
     return m(
       '.pf-multi-trace-modal__actions',
       m(Button, {
+        icon: 'edit',
+        onclick: () => (this.selectedTrace = trace),
+      }),
+      m(Button, {
         icon: 'delete',
         onclick: () => this.removeTrace(index),
-        disabled: this.isAnalyzing(),
+        disabled: isAnalyzing(this.traces),
       }),
     );
   }
@@ -242,14 +260,11 @@ class MultiTraceModalComponent
       trace.status === 'analyzing' && trace.progress !== undefined
         ? `(${(trace.progress * 100).toFixed(0)}%)`
         : '';
-
-    const statusText = statusInfo.text;
-
     return m(
       '.pf-multi-trace-modal__status-wrapper',
       m(
         '.pf-multi-trace-modal__status' + statusInfo.class,
-        `${statusText} ${progressText}`,
+        `${statusInfo.text} ${progressText}`,
       ),
       trace.status === 'error' &&
         trace.error &&
@@ -292,16 +307,19 @@ class MultiTraceModalComponent
   }
 
   private removeTrace(index: number) {
+    const removedTrace = this.traces[index];
     this.traces.splice(index, 1);
+    if (this.selectedTrace === removedTrace) {
+      this.selectedTrace = this.traces[0];
+    }
     redrawModal();
   }
 
   // Core Logic
   private async analyzeFiles(files: ReadonlyArray<File>) {
-    if (this.isAnalyzing() || files.length === 0) {
+    if (isAnalyzing(this.traces) || files.length === 0) {
       return;
     }
-
     const newTraces: TraceFile[] = [];
     for (const file of files) {
       const isDuplicate = this.traces.some((t) => t.file.name === file.name);
@@ -316,6 +334,11 @@ class MultiTraceModalComponent
         newTraces.push(trace);
       }
     }
+
+    if (!this.selectedTrace && this.traces.length > 0) {
+      this.selectedTrace = this.traces[0];
+    }
+
     redrawModal();
 
     for (const trace of newTraces) {
@@ -381,16 +404,6 @@ class MultiTraceModalComponent
       redrawModal();
     }
   }
-
-  // Helpers
-  private areAllTracesAnalyzed(): boolean {
-    return this.traces.every((trace) => trace.status === 'analyzed');
-  }
-
-  private isAnalyzing(): boolean {
-    return this.traces.some((trace) => trace.status === 'analyzing');
-  }
-
 }
 
 export function showMultiTraceModal(initialFiles: File[]) {

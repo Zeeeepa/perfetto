@@ -12,12 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-@mixin pf-multi-trace-modal--flex-center($justify: flex-start) {
-  display: flex;
-  align-items: center;
-  justify-content: $justify;
-}
-
 .pf-multi-trace-modal {
   $border-color-light: #eee;
   $border-color-medium: #ccc;
@@ -39,80 +33,77 @@
 
   display: flex;
   flex-direction: column;
-  gap: 0;
-  width: 800px;
-  max-height: 80vh;
-  overflow: auto;
 
-  &__subtitle {
-    margin-top: 16px;
-    padding: 16px 16px 8px;
+  &__main {
+    display: flex;
+  }
+
+  &__list-panel {
+    border-right: 1px solid $border-color-light;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: none;
+    border-radius: 0;
+  }
+
+  &__details-panel {
+    padding: 16px;
+  }
+
+  &__details-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
     color: $text-color-tertiary;
-    font-size: 0.9em;
-    border-top: 1px solid $border-color-light;
-    padding-top: 16px;
-
-    strong {
-      font-weight: 600;
-    }
   }
 
   footer {
-    @include pf-multi-trace-modal--flex-center(flex-end);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
     padding: 16px;
     margin-top: 12px;
     border-top: 1px solid $border-color-light;
   }
 
-  &__list {
+  &__card {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 4px;
-    margin: 0;
-    border: none;
-    border-radius: 0;
-    max-height: 200px;
-    overflow-y: auto;
+    align-items: center;
+    justify-content: space-between;
+    flex-grow: 1;
+    margin-bottom: 4px;
+    width: 400px;
   }
-
-  &__list {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    padding: 2px;
-
-    > .pf-card {
-      margin-bottom: 4px;
-    }
-    margin: 0;
-    border: none;
-    border-radius: 0;
-  }
-
-  &__card-content {
-    @include pf-multi-trace-modal--flex-center(flex-start);
-    padding: 2px;
-  }
-
 
   &__info {
-    @include pf-multi-trace-modal--flex-center(flex-start);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
     gap: 8px;
-    flex-grow: 1;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  &__summary {
+    display: flex;
+    gap: 8px;
   }
 
   &__name {
-    flex-grow: 1;
     color: $text-color-primary;
     font-size: 0.95em;
     font-weight: 600;
+    width: 300px;
   }
 
   &__size,
   &__status,
   &__format {
-    @include pf-multi-trace-modal--flex-center;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
     flex-shrink: 0;
     color: $text-color-secondary;
     font-size: 0.9em;
@@ -129,13 +120,15 @@
   }
 
   &__status-wrapper {
-    @include pf-multi-trace-modal--flex-center;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
     gap: 4px;
   }
 
   &__status {
     &::before {
-      content: '';
+      content: "";
       display: inline-block;
       width: 8px;
       height: 8px;
@@ -169,14 +162,16 @@
   }
 
   &__analyzing {
-    @include pf-multi-trace-modal--flex-center(center);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 12px;
     margin-bottom: 12px;
     border-radius: 6px;
     background-color: $primary-color-transparent;
 
     &::before {
-      content: '';
+      content: "";
       width: 16px;
       height: 16px;
       margin-right: 12px;
@@ -188,9 +183,10 @@
   }
 
   &__actions {
-    @include pf-multi-trace-modal--flex-center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 12px;
-    margin-left: 16px;
   }
 
   &__add-card {
@@ -205,11 +201,13 @@
   }
 
   &__add-card-content {
-    @include pf-multi-trace-modal--flex-center(center);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 4px;
     padding: 2px;
     color: $text-color-tertiary;
-    font-family: 'Roboto', sans-serif;
+    font-family: "Roboto", sans-serif;
     font-size: 0.9em;
     font-weight: bold;
   }
@@ -223,8 +221,11 @@
   }
 }
 
-.pf-multi-trace-modal-override main {
-  margin-top: 0;
+.pf-multi-trace-modal-override {
+  main {
+    margin-top: 16px;
+  }
+  padding: 16px;
 }
 
 @keyframes spin {
