@@ -33,39 +33,34 @@
 
   display: flex;
   flex-direction: column;
+  gap: 16px;
 
   &__main {
     display: flex;
+    gap: 16px;
   }
 
   &__list-panel {
     border-right: 1px solid $border-color-light;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 12px;
     border: none;
     border-radius: 0;
+    overflow-y: auto;
+    width: 500px;
+    max-height: 700px;
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
 
-  &__details-panel {
-    padding: 16px;
-  }
-
-  &__details-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: $text-color-tertiary;
-  }
-
-  footer {
+  &__footer {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    padding: 16px;
-    margin-top: 12px;
     border-top: 1px solid $border-color-light;
+    padding-top: 8px;
+    margin-top: 0px;
   }
 
   &__card {
@@ -73,13 +68,10 @@
     align-items: center;
     justify-content: space-between;
     flex-grow: 1;
-    margin-bottom: 4px;
-    width: 400px;
   }
 
   &__info {
     display: flex;
-    align-items: center;
     justify-content: flex-start;
     gap: 8px;
     flex-direction: column;
@@ -95,7 +87,7 @@
     color: $text-color-primary;
     font-size: 0.95em;
     font-weight: 600;
-    width: 300px;
+    width: 350px;
   }
 
   &__size,
@@ -192,24 +184,21 @@
   &__add-card {
     border: 1px dashed $border-color-medium;
     background-color: $bg-color-add-card;
-    cursor: pointer;
-    padding: 0;
-
-    &:hover {
-      background: $bg-color-add-card-hover;
-    }
-  }
-
-  &__add-card-content {
     display: flex;
+    cursor: pointer;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    height: 48px;
     padding: 2px;
     color: $text-color-tertiary;
     font-family: "Roboto", sans-serif;
     font-size: 0.9em;
     font-weight: bold;
+    flex-grow: 1;
+
+    &:hover {
+      background: $bg-color-add-card-hover;
+    }
   }
 
   &__status-tooltip {
@@ -226,6 +215,9 @@
     margin-top: 16px;
   }
   padding: 16px;
+  overflow-y: hidden;
+  max-width: none;
+  max-height: none;
 }
 
 @keyframes spin {

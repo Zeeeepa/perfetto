@@ -137,11 +137,19 @@ class MultiTraceModalComponent
         m(
           '.pf-multi-trace-modal__list-panel',
           this.traces.map((trace, index) => this.renderTraceItem(trace, index)),
-          this.renderAddTracesButton(),
+          m(
+            Card,
+            {
+              className: 'pf-multi-trace-modal__add-card',
+              onclick: () => this.addTraces(),
+            },
+            m(Icon, {icon: 'add'}),
+            'Add more traces',
+          ),
         ),
-        m('.pf-multi-trace-modal__details-panel', this.renderDetailsPanel()),
+        this.renderDetailsPanel(),
       ),
-      m('footer', this.renderActions()),
+      m('.pf-multi-trace-modal__footer', this.renderActions()),
     );
   }
 
@@ -149,14 +157,13 @@ class MultiTraceModalComponent
   private renderDetailsPanel() {
     if (!this.selectedTrace) {
       return m(
-        '.pf-multi-trace-modal__details-placeholder',
-        'Select a trace to see details',
+        '.pf-multi-trace-modal__details-panel',
+        m('h3', 'Select a trace file'),
       );
     }
     return m(
-      '.pf-multi-trace-modal__details-content',
+      '.pf-multi-trace-modal__details-panel',
       m('h3', this.selectedTrace.file.name),
-      // TODO(stevegolton): Add more details here
     );
   }
 
@@ -186,21 +193,6 @@ class MultiTraceModalComponent
       },
       this.renderTraceInfo(trace),
       this.renderCardActions(trace, index),
-    );
-  }
-
-  private renderAddTracesButton() {
-    return m(
-      Card,
-      {
-        className: 'pf-multi-trace-modal__add-card',
-        onclick: () => this.addTraces(),
-      },
-      m(
-        '.pf-multi-trace-modal__add-card-content',
-        m(Icon, {icon: 'add'}),
-        'Add more traces',
-      ),
     );
   }
 
@@ -310,7 +302,7 @@ class MultiTraceModalComponent
     const removedTrace = this.traces[index];
     this.traces.splice(index, 1);
     if (this.selectedTrace === removedTrace) {
-      this.selectedTrace = this.traces[0];
+      this.selectedTrace = undefined;
     }
     redrawModal();
   }
@@ -334,11 +326,6 @@ class MultiTraceModalComponent
         newTraces.push(trace);
       }
     }
-
-    if (!this.selectedTrace && this.traces.length > 0) {
-      this.selectedTrace = this.traces[0];
-    }
-
     redrawModal();
 
     for (const trace of newTraces) {
