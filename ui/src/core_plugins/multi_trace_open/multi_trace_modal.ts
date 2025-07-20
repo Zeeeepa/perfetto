@@ -26,7 +26,7 @@ import {WasmEngineProxy} from '../../trace_processor/wasm_engine_proxy';
 import {uuidv4} from '../../base/uuid';
 import {AppImpl} from '../../core/app_impl';
 import {MiddleEllipsis} from '../../widgets/middle_ellipsis';
-import {NUM, STR, STR_NULL} from '../../trace_processor/query_result';
+import {STR} from '../../trace_processor/query_result';
 
 const MODAL_KEY = 'multi-trace-modal';
 
@@ -90,21 +90,8 @@ function getStatusInfo(status: TraceStatus) {
   }
 }
 
-function getClockName(clock: Clock): string {
-  return clock.clock_name ?? `Clock Id: ${clock.clock_id}`;
-}
 
 type TraceStatus = 'not-analyzed' | 'analyzing' | 'analyzed' | 'error';
-
-interface Clock {
-  clock_name: string | null;
-  clock_id: number;
-}
-
-interface ClockLink {
-  source: {trace: TraceFile; clock: Clock};
-  target: {trace: TraceFile; clock: Clock};
-}
 
 interface TraceFile {
   file: File;
@@ -112,7 +99,6 @@ interface TraceFile {
   error?: string;
   progress?: number;
   format?: string;
-  clocks?: Clock[];
 }
 
 interface MultiTraceModalAttrs {
@@ -123,10 +109,6 @@ class MultiTraceModalComponent
   implements m.ClassComponent<MultiTraceModalAttrs>
 {
   private traces: TraceFile[] = [];
-  private primaryClocks = new Map<TraceFile, Clock>();
-  private manualLinks: ClockLink[] = [];
-  private linkingFrom?: {trace: TraceFile; clock: Clock};
-  private rootClock?: {trace: TraceFile; clock: Clock};
 
   // Lifecycle
   oncreate({attrs}: m.Vnode<MultiTraceModalAttrs>) {
@@ -142,18 +124,7 @@ class MultiTraceModalComponent
 
     return m(
       '.pf-multi-trace-modal',
-      m(
-        '.pf-multi-trace-modal__subtitle',
-        m('strong', 'Step 1: '),
-        'Configure properties for each trace. The primary clock for each trace is chosen from the trace metadata if available, or by a heuristic.',
-      ),
       this.traces.length === 0 ? this.renderEmpty() : this.renderTraceList(),
-      m(
-        '.pf-multi-trace-modal__subtitle',
-        m('strong', 'Step 2:'),
-        ' Link the primary clocks together. All clocks must have a path to a single root clock.',
-      ),
-      this.renderGraphCanvas(),
       m('footer', this.renderActions()),
     );
   }
@@ -173,9 +144,7 @@ class MultiTraceModalComponent
 
   private renderActions() {
     const isDisabled =
-      !this.areAllTracesAnalyzed() ||
-      this.traces.length === 0 ||
-      !this.isGraphFullyConnected();
+      !this.areAllTracesAnalyzed() || this.traces.length === 0;
 
     if (!isDisabled) {
       return this.renderOpenTracesButton(false);
@@ -188,78 +157,6 @@ class MultiTraceModalComponent
         trigger: this.renderOpenTracesButton(true),
       },
       getTooltipText(this.traces),
-    );
-  }
-
-  private renderGraphCanvas() {
-    const traces = this.traces;
-    if (traces.length < 2) {
-      return m(
-        '.pf-multi-trace-modal__graph-canvas-placeholder',
-        'Add at least two traces to configure clock synchronization.',
-      );
-    }
-
-    const canvasWidth = 768; // width of modal - padding
-    const canvasHeight = 200;
-    const centerX = canvasWidth / 2;
-    const centerY = canvasHeight / 2;
-    const radius = Math.min(centerX, centerY) * 0.8;
-
-    const nodePositions = new Map<TraceFile, {x: number; y: number}>();
-    const angleStep = (2 * Math.PI) / traces.length;
-
-    traces.forEach((trace, i) => {
-      const angle = i * angleStep - Math.PI / 2; // Start from top
-      const x = centerX + radius * Math.cos(angle);
-      const y = centerY + radius * Math.sin(angle);
-      nodePositions.set(trace, {x, y});
-    });
-
-    const autoLinks = this.getAutoLinks();
-    const manualLinks = this.manualLinks;
-
-    const renderLink = (link: ClockLink, dashed: boolean) => {
-      const sourcePos = nodePositions.get(link.source.trace);
-      const targetPos = nodePositions.get(link.target.trace);
-
-      if (!sourcePos || !targetPos) return null;
-
-      return m('line', {
-        x1: sourcePos.x,
-        y1: sourcePos.y,
-        x2: targetPos.x,
-        y2: targetPos.y,
-        class: dashed ? 'graph-link-dashed' : 'graph-link-solid',
-      });
-    };
-
-    return m(
-      '.pf-multi-trace-modal__graph-canvas',
-      m(
-        'svg.graph-svg',
-        {width: canvasWidth, height: canvasHeight},
-        autoLinks.map((link) => renderLink(link, true)),
-        manualLinks.map((link) => renderLink(link, false)),
-      ),
-      traces.map((trace) => {
-        const pos = nodePositions.get(trace);
-        if (!pos) return null;
-        const primaryClock = this.primaryClocks.get(trace);
-
-        // Determine if this trace is the root
-        const isRoot = this.rootClock?.trace === trace;
-
-        return m(
-          '.graph-node',
-          {
-            style: `left: ${pos.x}px; top: ${pos.y}px;`,
-            class: isRoot ? 'graph-node-root' : '',
-          },
-          m(MiddleEllipsis, {text: trace.file.name}),
-          primaryClock && m('.graph-node-clock', getClockName(primaryClock)),
-        );
-      }),
     );
   }
 
@@ -329,7 +226,6 @@ class MultiTraceModalComponent
   }
 
   private renderCardActions(index: number) {
-    const trace = this.traces[index];
     return m(
       '.pf-multi-trace-modal__actions',
       m(Button, {
@@ -396,22 +292,7 @@ class MultiTraceModalComponent
   }
 
   private removeTrace(index: number) {
-    const removedTrace = this.traces[index];
     this.traces.splice(index, 1);
-
-    // Clean up state associated with the removed trace
-    this.primaryClocks.delete(removedTrace);
-    this.manualLinks = this.manualLinks.filter(
-      (link) =>
-        link.source.trace !== removedTrace && link.target.trace !== removedTrace,
-    );
-    if (this.rootClock?.trace === removedTrace) {
-      this.rootClock = undefined;
-    }
-    if (this.linkingFrom?.trace === removedTrace) {
-      this.linkingFrom = undefined;
-    }
-
     redrawModal();
   }
 
@@ -487,47 +368,6 @@ class MultiTraceModalComponent
       } else if (leafNodes.length === 1) {
         trace.format = mapTraceType(leafNodes[0]);
         trace.status = 'analyzed';
-
-        const clocksResult = await engine.query(`
-          SELECT DISTINCT
-            clock_name,
-            clock_id
-          FROM clock_snapshot
-        `);
-        const clocks: Clock[] = [];
-        const clockIt = clocksResult.iter({
-          clock_name: STR_NULL,
-          clock_id: NUM,
-        });
-        for (; clockIt.valid(); clockIt.next()) {
-          clocks.push({
-            clock_name: clockIt.clock_name,
-            clock_id: clockIt.clock_id,
-          });
-        }
-        trace.clocks = clocks;
-
-        const defaultClockIdResult = await engine.query(`
-          SELECT int_value FROM metadata WHERE name = 'trace_time_clock_id'
-        `);
-        const defaultClockIdIt =
-          defaultClockIdResult.iter({int_value: NUM});
-
-        let defaultClock: Clock|undefined = undefined;
-        if (defaultClockIdIt.valid()) {
-          const defaultClockId = defaultClockIdIt.int_value;
-          defaultClock =
-            trace.clocks.find((c) => c.clock_id === defaultClockId);
-        }
-
-        // Fallback to the first clock if no default is found
-        if (!defaultClock && trace.clocks.length > 0) {
-          defaultClock = trace.clocks[0];
-        }
-
-        if (defaultClock) {
-          this.primaryClocks.set(trace, defaultClock);
-        }
       } else {
         // This case should ideally not be reached with a valid trace
         trace.status = 'error';
@@ -551,95 +391,6 @@ class MultiTraceModalComponent
     return this.traces.some((trace) => trace.status === 'analyzing');
   }
 
-  private isGraphFullyConnected(): boolean {
-    if (!this.rootClock) {
-      // If no clocks are selected, the graph is trivially connected.
-      return this.primaryClocks.size === 0;
-    }
-
-    const allLinks = this.manualLinks.concat(this.getAutoLinks());
-    const adjacencyList = new Map<string, string[]>();
-
-    const allNodes = new Set<string>();
-    for (const [trace, clock] of this.primaryClocks.entries()) {
-      const nodeKey = JSON.stringify({trace: trace.file.name, clock});
-      allNodes.add(nodeKey);
-      adjacencyList.set(nodeKey, []);
-    }
-
-    for (const link of allLinks) {
-      const sourceKey = JSON.stringify({
-        trace: link.source.trace.file.name,
-        clock: link.source.clock,
-      });
-      const targetKey = JSON.stringify({
-        trace: link.target.trace.file.name,
-        clock: link.target.clock,
-      });
-      adjacencyList.get(sourceKey)?.push(targetKey);
-      adjacencyList.get(targetKey)?.push(sourceKey);
-    }
-
-    const visited = new Set<string>();
-    const queue: {trace: TraceFile; clock: Clock}[] = [this.rootClock];
-    visited.add(
-      JSON.stringify({
-        trace: this.rootClock.trace.file.name,
-        clock: this.rootClock.clock,
-      }),
-    );
-
-    while (queue.length > 0) {
-      const node = queue.shift()!;
-      const nodeKey = JSON.stringify({
-        trace: node.trace.file.name,
-        clock: node.clock,
-      });
-      const neighbors = adjacencyList.get(nodeKey) || [];
-      for (const neighborKey of neighbors) {
-        if (!visited.has(neighborKey)) {
-          visited.add(neighborKey);
-          // This is inefficient, but ok for now.
-          for (const n of allNodes) {
-            if (n === neighborKey) {
-              const parsed = JSON.parse(n);
-              const trace = this.traces.find(
-                (t) => t.file.name === parsed.trace,
-              )!;
-              queue.push({trace, clock: parsed.clock});
-            }
-          }
-        }
-      }
-    }
-    return visited.size === allNodes.size;
-  }
-
-  private getAutoLinks(): ClockLink[] {
-    const nodes: {trace: TraceFile; clock: Clock}[] = [];
-    for (const [trace, clock] of this.primaryClocks.entries()) {
-      nodes.push({trace, clock});
-    }
-
-    const links: ClockLink[] = [];
-    const clocksByName = new Map<string, {trace: TraceFile; clock: Clock}[]>();
-
-    for (const node of nodes) {
-      if (node.clock.clock_name) {
-        if (!clocksByName.has(node.clock.clock_name)) {
-          clocksByName.set(node.clock.clock_name, []);
-        }
-        clocksByName.get(node.clock.clock_name)!.push(node);
-      }
-    }
-
-    for (const group of clocksByName.values()) {
-      for (let i = 0; i < group.length - 1; i++) {
-        links.push({source: group[i], target: group[i + 1]});
-      }
-    }
-    return links;
-  }
 }
 
 export function showMultiTraceModal(initialFiles: File[]) {
