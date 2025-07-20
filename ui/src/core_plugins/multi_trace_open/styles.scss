@@ -95,16 +95,11 @@
     padding: 2px;
   }
 
-  &__trace-details {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-  }
 
-  &__info,
-  &__meta {
+  &__info {
     @include pf-multi-trace-modal--flex-center(flex-start);
     gap: 8px;
+    flex-grow: 1;
   }
 
   &__name {
@@ -112,9 +107,9 @@
     color: $text-color-primary;
     font-size: 0.95em;
     font-weight: 600;
-    word-break: break-word;
   }
 
+  &__size,
   &__status,
   &__format {
     @include pf-multi-trace-modal--flex-center;
@@ -123,12 +118,14 @@
     font-size: 0.9em;
   }
 
-  &__size {
-    @include pf-multi-trace-modal--flex-center;
-    flex-shrink: 0;
-    color: $text-color-secondary;
-    font-size: 0.9em;
+  &__size,
+  &__format {
     gap: 4px;
+  }
+
+  &__size strong,
+  &__format strong {
+    font-weight: 600;
   }
 
   &__status-wrapper {
@@ -225,36 +222,7 @@
     padding: 8px;
   }
 
-  &__format {
-    gap: 4px;
-  }
 
-  &__format-label,
-  &__size-label {
-    font-weight: 600;
-  }
-
-  &__clock-display {
-    @include pf-multi-trace-modal--flex-center;
-    gap: 4px;
-  }
-
-  &__clock-name,
-  &__clock-value {
-    color: $text-color-secondary;
-    font-size: 0.9em;
-  }
-
-  &__clock-name {
-    font-weight: 600;
-  }
-
-  &__clock-popup {
-    .pf-menu {
-      max-height: 150px;
-      overflow-y: auto;
-    }
-  }
 }
 
 .pf-multi-trace-modal-override main {

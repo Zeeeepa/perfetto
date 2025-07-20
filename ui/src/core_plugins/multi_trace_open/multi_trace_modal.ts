@@ -20,7 +20,6 @@ import {Card} from '../../widgets/card';
 import {Intent} from '../../widgets/common';
 import {Icon} from '../../widgets/icon';
 import {PopupPosition} from '../../widgets/popup';
-import {MenuItem, PopupMenu} from '../../widgets/menu';
 import {Tooltip} from '../../widgets/tooltip';
 import {TraceFileStream} from '../../core/trace_stream';
 import {WasmEngineProxy} from '../../trace_processor/wasm_engine_proxy';
@@ -193,57 +192,75 @@ class MultiTraceModalComponent
   }
 
   private renderGraphCanvas() {
-    const nodes: {trace: TraceFile; clock: Clock}[] = [];
-    for (const [trace, clock] of this.primaryClocks.entries()) {
-      nodes.push({trace, clock});
+    const traces = this.traces;
+    if (traces.length < 2) {
+      return m(
+        '.pf-multi-trace-modal__graph-canvas-placeholder',
+        'Add at least two traces to configure clock synchronization.',
+      );
     }
 
-    const links = this.getAutoLinks();
+    const canvasWidth = 768; // width of modal - padding
+    const canvasHeight = 200;
+    const centerX = canvasWidth / 2;
+    const centerY = canvasHeight / 2;
+    const radius = Math.min(centerX, centerY) * 0.8;
 
-    return m('.pf-multi-trace-modal__graph-canvas', [
-      nodes.map((node) =>
-        m(
+    const nodePositions = new Map<TraceFile, {x: number; y: number}>();
+    const angleStep = (2 * Math.PI) / traces.length;
+
+    traces.forEach((trace, i) => {
+      const angle = i * angleStep - Math.PI / 2; // Start from top
+      const x = centerX + radius * Math.cos(angle);
+      const y = centerY + radius * Math.sin(angle);
+      nodePositions.set(trace, {x, y});
+    });
+
+    const autoLinks = this.getAutoLinks();
+    const manualLinks = this.manualLinks;
+
+    const renderLink = (link: ClockLink, dashed: boolean) => {
+      const sourcePos = nodePositions.get(link.source.trace);
+      const targetPos = nodePositions.get(link.target.trace);
+
+      if (!sourcePos || !targetPos) return null;
+
+      return m('line', {
+        x1: sourcePos.x,
+        y1: sourcePos.y,
+        x2: targetPos.x,
+        y2: targetPos.y,
+        class: dashed ? 'graph-link-dashed' : 'graph-link-solid',
+      });
+    };
+
+    return m(
+      '.pf-multi-trace-modal__graph-canvas',
+      m(
+        'svg.graph-svg',
+        {width: canvasWidth, height: canvasHeight},
+        autoLinks.map((link) => renderLink(link, true)),
+        manualLinks.map((link) => renderLink(link, false)),
+      ),
+      traces.map((trace) => {
+        const pos = nodePositions.get(trace);
+        if (!pos) return null;
+        const primaryClock = this.primaryClocks.get(trace);
+
+        // Determine if this trace is the root
+        const isRoot = this.rootClock?.trace === trace;
+
+        return m(
           '.graph-node',
-          `${node.trace.file.name}: ${getClockName(node.clock)}`,
-          this.rootClock === node ? m('span', ' (Root)') : '',
-          m(Button, {
-            label: 'Set as Root',
-            onclick: () => {
-              this.rootClock = node;
-            },
-          }),
-          m(Button, {
-            label: this.linkingFrom === node ? 'Linking...' : 'Link',
-            onclick: () => {
-              if (this.linkingFrom && this.linkingFrom !== node) {
-                this.manualLinks.push({source: this.linkingFrom, target: node});
-                this.linkingFrom = undefined;
-              } else {
-                this.linkingFrom = node;
-              }
-            },
-          }),
-        ),
-      ),
-      links.map((link) =>
-        m(
-          '.graph-link',
-          `Auto Link: ${getClockName(link.source.clock)} (${link.source.trace.file.name}) -> ${getClockName(link.target.clock)} (${link.target.trace.file.name})`,
-        ),
-      ),
-      this.manualLinks.map((link, index) =>
-        m(
-          '.graph-link',
-          `Manual Link: ${getClockName(link.source.clock)} (${link.source.trace.file.name}) -> ${getClockName(link.target.clock)} (${link.target.trace.file.name})`,
-          m(Button, {
-            label: 'Delete',
-            onclick: () => {
-              this.manualLinks.splice(index, 1);
-            },
-          }),
-        ),
-      ),
-    ]);
+          {
+            style: `left: ${pos.x}px; top: ${pos.y}px;`,
+            class: isRoot ? 'graph-node-root' : '',
+          },
+          m(MiddleEllipsis, {text: trace.file.name}),
+          primaryClock && m('.graph-node-clock', getClockName(primaryClock)),
+        );
+      }),
+    );
   }
 
   // Sub-Renderers
@@ -255,10 +272,7 @@ class MultiTraceModalComponent
       },
       m(
         '.pf-multi-trace-modal__card-content',
-        m('.pf-multi-trace-modal__trace-details', [
-          this.renderTraceInfo(trace),
-          this.renderTraceMeta(trace),
-        ]),
+        this.renderTraceInfo(trace),
         this.renderCardActions(index),
       ),
     );
@@ -296,59 +310,32 @@ class MultiTraceModalComponent
         '.pf-multi-trace-modal__name',
         m(MiddleEllipsis, {text: trace.file.name}),
       ),
-    );
-  }
-
-  private renderTraceMeta(trace: TraceFile) {
-    return m('.pf-multi-trace-modal__meta', [
       m(
         '.pf-multi-trace-modal__size',
-        m('span.pf-multi-trace-modal__size-label', 'Size:'),
+        m('strong', 'Size:'),
         m(
-          'span.pf-multi-trace-modal__size-value',
+          'span',
           `${(trace.file.size / (1024 * 1024)).toFixed(1)} MB`,
         ),
       ),
-      trace.status === 'analyzed' && trace.format ? [
+      trace.status === 'analyzed' && trace.format ?
         m(
             '.pf-multi-trace-modal__format',
-            m('span.pf-multi-trace-modal__format-label', 'Format:'),
-            m('span.pf-multi-trace-modal__format-value', trace.format),
-            ),
-        m(
-            '.pf-multi-trace-modal__clock-display',
-            m('.pf-multi-trace-modal__clock-name', 'Primary clock:'),
-            m('.pf-multi-trace-modal__clock-value',
-              getClockName(this.primaryClocks.get(trace)!)),
-            ),
-      ]:
+            m('strong', 'Format:'),
+            m('span', trace.format),
+            ) :
         this.renderTraceStatus(trace),
-    ]);
+    );
   }
 
   private renderCardActions(index: number) {
     const trace = this.traces[index];
     return m(
       '.pf-multi-trace-modal__actions',
-      trace.status === 'analyzed' && trace.clocks && m(PopupMenu, {
-        className: 'pf-multi-trace-modal__clock-popup',
-        trigger: m(Button, {icon: 'edit', compact: true}),
-      },
-        m(MenuItem, {label: 'Primary clock'},
-          ...trace.clocks.map((clock) => m(MenuItem, {
-            label: getClockName(clock),
-            onclick: () => {
-              this.primaryClocks.set(trace, clock);
-              redrawModal();
-            },
-          })),
-          ),
-        ),
       m(Button, {
         icon: 'delete',
         onclick: () => this.removeTrace(index),
         disabled: this.isAnalyzing(),
-        compact: true,
       }),
     );
   }
