@@ -27,6 +27,11 @@
   $primary-color: var(--primary-color, #3e8ad3);
   $primary-color-border: rgba(62, 138, 211, 0.3);
 
+  &__main {
+    align-items: stretch;
+    min-height: 500px;
+  }
+
   &__list-panel {
     border: none;
     overflow-y: auto;
@@ -90,6 +95,10 @@
     }
   }
 
+  &__status-wrapper {
+    align-items: center;
+  }
+
   &__status-tooltip {
     padding: 8px;
   }
@@ -114,6 +123,7 @@
     border-top: 1px solid $border-color-light;
     padding-top: 8px;
     margin-top: 0px;
+    justify-content: flex-end;
   }
 
   &__open-traces-tooltip {
@@ -122,7 +132,13 @@
 
   &__separator {
     width: 1px;
-    background-color: $border-color-light;
+    background-color: $border-color-medium;
+    margin-left: 8px;
+    margin-right: 8px;
+  }
+
+  &__details-panel {
+    width: 500px;
   }
 
   &__details-header {
