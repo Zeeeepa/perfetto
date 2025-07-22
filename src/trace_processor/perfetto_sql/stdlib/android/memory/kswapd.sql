@@ -15,6 +15,7 @@
 
 -- Breakdown of kswapd duration on each cpu.
 DROP VIEW IF EXISTS android_kswapd_cpu_breakdown;
+
 CREATE PERFETTO VIEW android_kswapd_cpu_breakdown (
   -- cpu
   cpu LONG,
@@ -25,16 +26,28 @@ CREATE PERFETTO VIEW android_kswapd_cpu_breakdown (
   -- percentage of kswapd
   kswapd_pct DOUBLE
 ) AS
-SELECT cpu, SUM(dur) AS cpu_dur, kswapd_dur,
-    CASE WHEN SUM(dur) > 0 THEN CAST(kswapd_dur AS DOUBLE) / SUM(dur) * 100.0
+SELECT
+  cpu,
+  sum(dur) AS cpu_dur,
+  kswapd_dur,
+  CASE
+    WHEN sum(dur) > 0
+    THEN CAST(kswapd_dur AS DOUBLE) / sum(dur) * 100.0
     ELSE 0.0
-    END AS kswapd_pct
+  END AS kswapd_pct
 FROM sched
 JOIN (
-    SELECT cpu, SUM(dur) AS kswapd_dur
-    FROM sched JOIN thread USING (utid)
-    WHERE thread.name = 'kswapd0'
-    GROUP BY cpu
-    ) kd
-USING (cpu)
-GROUP BY cpu;
+  SELECT
+    cpu,
+    sum(dur) AS kswapd_dur
+  FROM sched
+  JOIN thread
+    USING (utid)
+  WHERE
+    thread.name = 'kswapd0'
+  GROUP BY
+    cpu
+) AS kd
+  USING (cpu)
+GROUP BY
+  cpu;
