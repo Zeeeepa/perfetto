@@ -24,20 +24,20 @@ message AndroidKswapdMetric {
   // Represents the kswapd activity on a single CPU.
   message KswapdCpuStats {
     // The CPU index.
-    int32 cpu = 1;
+    optional int32 cpu = 1;
 
     // The total duration of all tasks scheduled on this CPU over the
     // trace period, in nanoseconds.
-    int64 total_cpu_duration_ns = 2;
+    optional int64 total_cpu_duration_ns = 2;
 
     // The total duration that the 'kswapd' thread was running on this CPU
     // over the trace period, in nanoseconds.
-    int64 kswapd_on_cpu_duration_ns = 3;
+    optional int64 kswapd_on_cpu_duration_ns = 3;
 
     // The percentage of this CPU's total time that was spent running 'kswapd'.
     // This is a derived value:
     // (kswapd_on_cpu_duration_ns / total_cpu_duration_ns) * 100.0
-    double kswapd_on_cpu_percentage = 4;
+    optional double kswapd_on_cpu_percentage = 4;
   }
 
   // Contains statistics for kswapd on each individual CPU.
