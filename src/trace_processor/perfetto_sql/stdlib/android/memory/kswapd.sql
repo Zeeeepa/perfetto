@@ -14,8 +14,6 @@
 -- limitations under the License.
 
 -- Breakdown of kswapd duration on each cpu.
-DROP VIEW IF EXISTS android_kswapd_cpu_breakdown;
-
 CREATE PERFETTO VIEW android_kswapd_cpu_breakdown (
   -- cpu
   cpu LONG,
