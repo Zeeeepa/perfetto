@@ -51,6 +51,7 @@ perfetto_sql_source_set("android") {
     "android_ion.sql",
     "android_irq_runtime.sql",
     "android_jank_cuj.sql",
+    "android_kswapd.sql",
     "android_lmk.sql",
     "android_lmk_reason.sql",
     "android_mem.sql",

@@ -1937,6 +1937,36 @@ message JavaHeapStats {
 
 // End of protos/perfetto/metrics/android/java_heap_stats.proto
 
+// Begin of protos/perfetto/metrics/android/kswapd_metric.proto
+
+// Kswapd stats on Android.
+// This message aggregates the activity of kswapd across all CPUs.
+message AndroidKswapdMetric {
+  // Represents the kswapd activity on a single CPU.
+  message KswapdCpuStats {
+    // The CPU index.
+    optional int32 cpu = 1;
+
+    // The total duration of all tasks scheduled on this CPU over the
+    // trace period, in nanoseconds.
+    optional int64 total_cpu_duration_ns = 2;
+
+    // The total duration that the 'kswapd' thread was running on this CPU
+    // over the trace period, in nanoseconds.
+    optional int64 kswapd_on_cpu_duration_ns = 3;
+
+    // The percentage of this CPU's total time that was spent running 'kswapd'.
+    // This is a derived value:
+    // (kswapd_on_cpu_duration_ns / total_cpu_duration_ns) * 100.0
+    optional double kswapd_on_cpu_percentage = 4;
+  }
+
+  // Contains statistics for kswapd on each individual CPU.
+  repeated KswapdCpuStats cpu_stats = 1;
+}
+
+// End of protos/perfetto/metrics/android/kswapd_metric.proto
+
 // Begin of protos/perfetto/metrics/android/lmk_metric.proto
 
 // LMK stats on Android.
@@ -3554,6 +3584,9 @@ message TraceMetrics {
   // Android Wattson thread attribution during atrace app windows.
   optional AndroidWattsonTasksAttributionMetric wattson_atrace_apps_threads =
       80;
+
+  // Metrics about kswapd0
+  optional AndroidKswapdMetric kswapd_metric = 81;
 
   // Android
   // Demo extensions.

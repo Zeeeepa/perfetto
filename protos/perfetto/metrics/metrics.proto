@@ -53,6 +53,7 @@ import "protos/perfetto/metrics/android/jank_cuj_metric.proto";
 import "protos/perfetto/metrics/android/java_heap_histogram.proto";
 import "protos/perfetto/metrics/android/java_heap_class_stats.proto";
 import "protos/perfetto/metrics/android/java_heap_stats.proto";
+import "protos/perfetto/metrics/android/kswapd_metric.proto";
 import "protos/perfetto/metrics/android/lmk_metric.proto";
 import "protos/perfetto/metrics/android/lmk_reason_metric.proto";
 import "protos/perfetto/metrics/android/mem_metric.proto";
@@ -374,6 +375,9 @@ message TraceMetrics {
   // Android Wattson thread attribution during atrace app windows.
   optional AndroidWattsonTasksAttributionMetric wattson_atrace_apps_threads =
       80;
+
+  // Metrics about kswapd0
+  optional AndroidKswapdMetric kswapd_metric = 81;
 
   // Android
   // Demo extensions.
