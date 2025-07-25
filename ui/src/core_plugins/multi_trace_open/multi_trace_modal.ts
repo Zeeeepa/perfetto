@@ -366,20 +366,32 @@ class MultiTraceModalComponent
   }
 
   private renderActions() {
+    const syncError = this.controller.syncError;
     const isDisabled =
       !areAllTracesAnalyzed(this.controller.traces) ||
-      this.controller.traces.length === 0;
-    if (!isDisabled) {
-      return this.renderOpenTracesButton(false);
-    }
-    return m(
-      Tooltip,
-      {
-        className: 'pf-multi-trace-modal__open-traces-tooltip',
-        trigger: this.renderOpenTracesButton(true),
-      },
-      getTooltipText(this.controller.traces),
-    );
+      this.controller.traces.length === 0 ||
+      !!syncError;
+
+    const tooltipText = syncError ?? getTooltipText(this.controller.traces);
+
+    const openButton = this.renderOpenTracesButton(isDisabled);
+
+    return [
+      syncError &&
+        m(
+          '.pf-multi-trace-modal__error',
+          m(Icon, {icon: 'error_outline'}),
+          syncError,
+        ),
+      m(
+        Tooltip,
+        {
+          className: 'pf-multi-trace-modal__open-traces-tooltip',
+          trigger: openButton,
+        },
+        tooltipText,
+      ),
+    ];
   }
 
   // Sub-Renderers

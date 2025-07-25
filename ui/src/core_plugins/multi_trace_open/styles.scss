@@ -121,6 +121,16 @@
     padding-top: 8px;
     margin-top: 0px;
     justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__error {
+    color: $status-color-error;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: auto; // Pushes this element to the far left
   }
 
   &__open-traces-tooltip {

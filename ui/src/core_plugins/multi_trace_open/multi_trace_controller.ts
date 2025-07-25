@@ -14,6 +14,7 @@
 
 import {
   ClockInfo,
+  SyncConfig,
   TraceFile,
   TraceFileAnalyzed,
 } from './multi_trace_types';
@@ -22,6 +23,7 @@ import {uuidv4} from '../../base/uuid';
 import {redrawModal} from '../../widgets/modal';
 import {TraceFileStream} from '../../core/trace_stream';
 import {NUM, STR} from '../../trace_processor/query_result';
+import {assertExists} from '../../base/logging';
 
 function getErrorMessage(e: unknown): string {
   const err = e instanceof Error ? e.message : `${e}`;
@@ -47,7 +49,7 @@ interface TraceFileWrapper {
 export class MultiTraceController {
   private wrappers: TraceFileWrapper[] = [];
   private selectedUuid?: string;
-  private syncError?: string;
+  syncError?: string;
 
   get traces(): ReadonlyArray<TraceFile> {
     return this.wrappers.map((x) => x.trace);
@@ -110,17 +112,132 @@ export class MultiTraceController {
 
     if (manualRoots.length > 1) {
       this.syncError = 'Multiple manual root traces are not allowed.';
+      redrawModal();
       return;
     }
 
-    // TODO: Implement automatic sync logic here for 'automaticTraces'
-    // using 'manualTraces' as constraints.
-    console.log(
-      'Recomputing sync with:',
-      manualTraces,
-      automaticTraces,
-      this.syncError,
-    );
+    // Build a graph of all analyzed traces
+    const adj: Map<string, string[]> = new Map();
+    const clocksByUuid = new Map<string, Set<string>>();
+
+    for (const trace of analyzedTraces) {
+      adj.set(trace.uuid, []);
+      clocksByUuid.set(trace.uuid, new Set(trace.clocks.map((c) => c.name)));
+    }
+
+    for (let i = 0; i < analyzedTraces.length; i++) {
+      for (let j = i + 1; j < analyzedTraces.length; j++) {
+        const traceA = analyzedTraces[i];
+        const traceB = analyzedTraces[j];
+        const clocksA = assertExists(clocksByUuid.get(traceA.uuid));
+        const clocksB = assertExists(clocksByUuid.get(traceB.uuid));
+        const commonClocks = [...clocksA].filter((clock) =>
+          clocksB.has(clock),
+        );
+        if (commonClocks.length > 0) {
+          assertExists(adj.get(traceA.uuid)).push(traceB.uuid);
+          assertExists(adj.get(traceB.uuid)).push(traceA.uuid);
+        }
+      }
+    }
+
+    // Determine the root trace
+    let rootUuid: string | undefined = undefined;
+    if (manualRoots.length === 1) {
+      rootUuid = manualRoots[0].uuid;
+    } else if (analyzedTraces.length > 0) {
+      // Heuristic: pick the trace with the most connections as the root.
+      // Only consider automatic traces for this heuristic if there's no manual
+      // root.
+      const tracesForHeuristic =
+        automaticTraces.length > 0 ? automaticTraces : analyzedTraces;
+      if (tracesForHeuristic.length > 0) {
+        rootUuid = tracesForHeuristic.reduce((a, b) => {
+          return (adj.get(a.uuid)?.length ?? 0) >
+            (adj.get(b.uuid)?.length ?? 0)
+            ? a
+            : b;
+        }).uuid;
+      }
+    }
+
+    if (!rootUuid) {
+      // No traces or no connections, give all automatic traces a default ROOT
+      // config
+      for (const trace of automaticTraces) {
+        trace.syncConfig = {
+          syncMode: 'ROOT',
+          rootClock: trace.clocks[0]?.name ?? '',
+        };
+      }
+      redrawModal();
+      return;
+    }
+
+    // Traverse the graph with BFS to build sync configs
+    const queue: Array<{uuid: string; parentUuid: string | null}> = [
+      {uuid: rootUuid, parentUuid: null},
+    ];
+    const visited: Set<string> = new Set([rootUuid]);
+    const newConfigs = new Map<string, SyncConfig>();
+
+    // Set root config for the root trace if it's in automatic mode
+    const rootTrace = analyzedTraces.find((t) => t.uuid === rootUuid)!;
+    if (rootTrace.syncMode === 'AUTOMATIC') {
+      newConfigs.set(rootUuid, {
+        syncMode: 'ROOT',
+        rootClock: rootTrace.clocks[0]?.name ?? '', // Default to first clock
+      });
+    }
+
+    while (queue.length > 0) {
+      const {uuid: parentUuid} = queue.shift()!;
+      const neighbors = adj.get(parentUuid) ?? [];
+
+      for (const childUuid of neighbors) {
+        if (!visited.has(childUuid)) {
+          visited.add(childUuid);
+
+          const childTrace = analyzedTraces.find((t) => t.uuid === childUuid)!;
+          // Only configure automatic traces
+          if (childTrace.syncMode === 'AUTOMATIC') {
+            const parentClocks = assertExists(clocksByUuid.get(parentUuid));
+            const childClocks = assertExists(clocksByUuid.get(childUuid));
+            const commonClock = [...parentClocks].find((clock) =>
+              childClocks.has(clock),
+            );
+
+            if (commonClock) {
+              newConfigs.set(childUuid, {
+                syncMode: 'SYNC_TO_OTHER',
+                syncClock: {
+                  fromClock: commonClock,
+                  toTraceUuid: parentUuid,
+                  toClock: commonClock,
+                },
+              });
+            }
+          }
+          queue.push({uuid: childUuid, parentUuid: parentUuid});
+        }
+      }
+    }
+
+    // Apply the new configs to automatic traces
+    for (const trace of automaticTraces) {
+      const newConfig = newConfigs.get(trace.uuid);
+      if (newConfig) {
+        trace.syncConfig = newConfig;
+      } else {
+        // This trace is not connected to the main graph.
+        // Make it a root.
+        trace.syncConfig = {
+          syncMode: 'ROOT',
+          rootClock: trace.clocks[0]?.name ?? '',
+        };
+      }
+    }
+    redrawModal();
   }
 
   private async analyzeTrace(wrapper: TraceFileWrapper) {
@@ -202,8 +319,10 @@ export class MultiTraceController {
         format: mapTraceType(leafNodes[0]),
         clocks: clocks,
         syncMode: 'AUTOMATIC',
+        // Default config, will be overwritten by recomputeSync
         syncConfig: {
-          syncMode: 'SYNC_TO_OTHER',
+          syncMode: 'ROOT',
+          rootClock: '',
         },
       };
     } catch (e) {
@@ -212,8 +331,6 @@ export class MultiTraceController {
         status: 'error',
         error: getErrorMessage(e),
       };
-    } finally {
-      redrawModal();
     }
   }
 }
