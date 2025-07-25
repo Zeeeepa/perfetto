@@ -470,9 +470,8 @@ class MultiTraceModalComponent
 
     if (config.syncMode === 'ROOT') {
       syncSummary = m('span', [
-        'Clock: ',
+        'Clock: Root clock for all traces ',
         m('strong', config.rootClock),
-        ' root',
       ]);
     } else {
       const targetTrace = this.controller.traces.find(
@@ -489,7 +488,7 @@ class MultiTraceModalComponent
       syncSummary = m('span', [
         'Clock: ',
         m('strong', fromClock),
-        ' synced -> ',
+        ' -> ',
         m('strong', toClock),
         ' in ',
         targetName,
