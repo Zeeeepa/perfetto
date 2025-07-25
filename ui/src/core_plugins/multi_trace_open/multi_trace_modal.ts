@@ -97,7 +97,10 @@ class MultiTraceModalComponent
     return m(
       Stack,
       {className: 'pf-multi-trace-modal__details-panel'},
-      m('h3.pf-multi-trace-modal__details-header', trace.file.name),
+      m(
+        'h3.pf-multi-trace-modal__details-header',
+        m(MiddleEllipsis, {text: trace.file.name}),
+      ),
       trace.status === 'analyzed'
         ? this.renderAnalyzedDetails(trace)
         : m('span', 'TODO add viz depending on status'),
@@ -426,10 +429,12 @@ class MultiTraceModalComponent
         className: 'pf-multi-trace-modal__info',
         spacing: 'large',
       },
+      // Line 1: Name
       m(MiddleEllipsis, {
         text: trace.file.name,
         className: 'pf-multi-trace-modal__name',
       }),
+      // Line 2: Size and Format/Status
       m(
         Stack,
         {orientation: 'horizontal', spacing: 'large'},
@@ -454,6 +459,47 @@ class MultiTraceModalComponent
             )
           : this.renderTraceStatus(trace),
       ),
+      // Line 3: Sync Status
+      trace.status === 'analyzed' && this.renderSyncStatus(trace),
+    );
+  }
+
+  private renderSyncStatus(trace: TraceFileAnalyzed) {
+    let syncSummary: m.Children;
+    const config = trace.syncConfig;
+
+    if (config.syncMode === 'ROOT') {
+      syncSummary = m('span', [
+        'Clock: ',
+        m('strong', config.rootClock),
+        ' root',
+      ]);
+    } else {
+      const targetTrace = this.controller.traces.find(
+        (t) => t.uuid === config.syncClock?.toTraceUuid,
+      );
+      const targetName = targetTrace
+        ? m(MiddleEllipsis, {
+            text: targetTrace.file.name,
+            className: 'pf-multi-trace-modal__sync-target',
+          })
+        : 'another trace';
+      const fromClock = config.syncClock?.fromClock ?? '...';
+      const toClock = config.syncClock?.toClock ?? '...';
+      syncSummary = m('span', [
+        'Clock: ',
+        m('strong', fromClock),
+        ' synced -> ',
+        m('strong', toClock),
+        ' in ',
+        targetName,
+      ]);
+    }
+
+    return m(
+      '.pf-multi-trace-modal__sync-status',
+      m(Icon, {icon: 'sync'}),
+      syncSummary,
     );
   }
 

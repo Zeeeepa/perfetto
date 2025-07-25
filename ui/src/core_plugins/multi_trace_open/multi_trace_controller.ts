@@ -30,10 +30,6 @@ function getErrorMessage(e: unknown): string {
   return err;
 }
 
-interface TraceFileWrapper {
-  trace: TraceFile;
-}
-
 const PREFERRED_ROOT_CLOCKS = [
   'BOOTTIME',
   'MONOTONIC',
@@ -44,6 +40,10 @@ const PREFERRED_ROOT_CLOCKS = [
   'REALTIME_COARSE',
   'PERF',
 ];
+
+interface TraceFileWrapper {
+  trace: TraceFile;
+}
 
 export class MultiTraceController {
   private wrappers: TraceFileWrapper[] = [];
@@ -109,7 +109,6 @@ export class MultiTraceController {
       (trace) => trace.syncMode === 'AUTOMATIC',
     );
 
-    // Validate manual configurations
     const manualRoots = manualTraces.filter(
       (trace) => trace.syncConfig.syncMode === 'ROOT',
     );
@@ -120,10 +119,8 @@ export class MultiTraceController {
       return;
     }
 
-    // Build a graph of all analyzed traces
-    const adj: Map<string, string[]> = new Map();
+    const adj = new Map<string, string[]>();
     const clocksByUuid = new Map<string, Set<string>>();
-
     for (const trace of analyzedTraces) {
       adj.set(trace.uuid, []);
       clocksByUuid.set(trace.uuid, new Set(trace.clocks.map((c) => c.name)));
@@ -135,117 +132,85 @@ export class MultiTraceController {
         const traceB = analyzedTraces[j];
         const clocksA = assertExists(clocksByUuid.get(traceA.uuid));
         const clocksB = assertExists(clocksByUuid.get(traceB.uuid));
-        const commonClocks = [...clocksA].filter((clock) =>
-          clocksB.has(clock),
-        );
-        if (commonClocks.length > 0) {
-          assertExists(adj.get(traceA.uuid)).push(traceB.uuid);
-          assertExists(adj.get(traceB.uuid)).push(traceA.uuid);
+        if (
+          [...clocksA].some((clock) => clocksB.has(clock))
+        ) {
+          adj.get(traceA.uuid)!.push(traceB.uuid);
+          adj.get(traceB.uuid)!.push(traceA.uuid);
         }
       }
     }
 
-    // Determine the root trace
-    let rootUuid: string | undefined = undefined;
-    if (manualRoots.length === 1) {
-      rootUuid = manualRoots[0].uuid;
-    } else if (analyzedTraces.length > 0) {
-      const tracesForHeuristic =
-        automaticTraces.length > 0 ? automaticTraces : analyzedTraces;
+    let rootUuid: string | undefined =
+      manualRoots.length === 1 ? manualRoots[0].uuid : undefined;
+
+    if (!rootUuid && automaticTraces.length > 0) {
       for (const clock of PREFERRED_ROOT_CLOCKS) {
-        const traceWithClock = tracesForHeuristic.find((t) =>
-          t.clocks.some((c) => c.name === clock),
+        const traceWithClock = automaticTraces.find((t) =>
+          clocksByUuid.get(t.uuid)!.has(clock),
         );
         if (traceWithClock) {
           rootUuid = traceWithClock.uuid;
           break;
         }
       }
-    }
-
-    if (!rootUuid) {
-      // No traces or no connections, give all automatic traces a default ROOT
-      // config
-      for (const trace of automaticTraces) {
-        trace.syncConfig = {
-          syncMode: 'ROOT',
-          rootClock: trace.clocks[0]?.name ?? '',
-        };
+      if (!rootUuid) {
+        rootUuid = automaticTraces.reduce((a, b) =>
+          (adj.get(a.uuid)!.length > adj.get(b.uuid)!.length ? a : b),
+        ).uuid;
       }
-      redrawModal();
-      return;
     }
 
-    // Traverse the graph with BFS to build sync configs
-    const queue: Array<{uuid: string; parentUuid: string | null}> = [
-      {uuid: rootUuid, parentUuid: null},
-    ];
-    const visited: Set<string> = new Set([rootUuid]);
     const newConfigs = new Map<string, SyncConfig>();
+    if (rootUuid) {
+      const queue: string[] = [rootUuid];
+      const visited = new Set<string>([rootUuid]);
+      const rootTrace = analyzedTraces.find((t) => t.uuid === rootUuid)!;
+      if (rootTrace.syncMode === 'AUTOMATIC') {
+        const rootTraceClocks = clocksByUuid.get(rootUuid)!;
+        const bestClock = PREFERRED_ROOT_CLOCKS.find((c) =>
+          rootTraceClocks.has(c),
+        );
+        newConfigs.set(rootUuid, {
+          syncMode: 'ROOT',
+          rootClock: bestClock ?? rootTrace.clocks[0]?.name ?? '',
+        });
+      }
 
-    // Set root config for the root trace if it's in automatic mode
-    const rootTrace = analyzedTraces.find((t) => t.uuid === rootUuid)!;
-    if (rootTrace.syncMode === 'AUTOMATIC') {
-      const rootTraceClocks = new Set(rootTrace.clocks.map((c) => c.name));
-      const bestClock = PREFERRED_ROOT_CLOCKS.find((c) =>
-        rootTraceClocks.has(c),
-      );
-      newConfigs.set(rootUuid, {
-        syncMode: 'ROOT',
-        rootClock: bestClock ?? rootTrace.clocks[0]?.name ?? '',
-      });
-    }
-
-    while (queue.length > 0) {
-      const {uuid: parentUuid} = queue.shift()!;
-      const neighbors = adj.get(parentUuid) ?? [];
-
-      for (const childUuid of neighbors) {
-        if (!visited.has(childUuid)) {
+      while (queue.length > 0) {
+        const parentUuid = queue.shift()!;
+        for (const childUuid of adj.get(parentUuid)!) {
+          if (visited.has(childUuid)) continue;
           visited.add(childUuid);
-
           const childTrace = analyzedTraces.find((t) => t.uuid === childUuid)!;
-          // Only configure automatic traces
-          if (childTrace.syncMode === 'AUTOMATIC') {
-            const parentClocks = assertExists(clocksByUuid.get(parentUuid));
-            const childClocks = assertExists(clocksByUuid.get(childUuid));
+          if (childTrace.syncMode === 'MANUAL') continue;
 
-            // Find the best common clock based on the preferred order
-            let bestCommonClock: string | undefined = undefined;
-            for (const preferredClock of PREFERRED_ROOT_CLOCKS) {
-              if (
-                parentClocks.has(preferredClock) &&
-                childClocks.has(preferredClock)
-              ) {
-                bestCommonClock = preferredClock;
-                break;
-              }
-            }
+          const parentClocks = clocksByUuid.get(parentUuid)!;
+          const childClocks = clocksByUuid.get(childUuid)!;
+          const bestCommonClock = PREFERRED_ROOT_CLOCKS.find(
+            (c) => parentClocks.has(c) && childClocks.has(c),
+          );
 
-            if (bestCommonClock) {
-              newConfigs.set(childUuid, {
-                syncMode: 'SYNC_TO_OTHER',
-                syncClock: {
-                  fromClock: bestCommonClock,
-                  toTraceUuid: parentUuid,
-                  toClock: bestCommonClock,
-                },
-              });
-            }
+          if (bestCommonClock) {
+            newConfigs.set(childUuid, {
+              syncMode: 'SYNC_TO_OTHER',
+              syncClock: {
+                fromClock: bestCommonClock,
+                toTraceUuid: parentUuid,
+                toClock: bestCommonClock,
+              },
+            });
+            queue.push(childUuid);
           }
-          queue.push({uuid: childUuid, parentUuid: parentUuid});
         }
       }
     }
 
-    // Apply the new configs to automatic traces
     for (const trace of automaticTraces) {
       const newConfig = newConfigs.get(trace.uuid);
       if (newConfig) {
         trace.syncConfig = newConfig;
       } else {
-        // This trace is not connected to the main graph.
-        // Make it a root.
         trace.syncConfig = {
           syncMode: 'ROOT',
           rootClock: trace.clocks[0]?.name ?? '',
@@ -282,7 +247,6 @@ export class MultiTraceController {
         format: result.format,
         clocks: result.clocks,
         syncMode: 'AUTOMATIC',
-        // Default config, will be overwritten by recomputeSync
         syncConfig: {
           syncMode: 'ROOT',
           rootClock: '',

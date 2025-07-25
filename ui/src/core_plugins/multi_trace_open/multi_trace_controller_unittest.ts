@@ -90,7 +90,7 @@ describe('MultiTraceController', () => {
     const file = createMockFile('trace1.pftrace');
     fakeAnalyzer.setResult(file.name, {
       format: 'Perfetto',
-      clocks: [{name: 'boottime', count: 1}],
+      clocks: [{name: 'BOOTTIME', count: 1}],
     });
 
     await controller.addFiles([file]);
@@ -105,12 +105,12 @@ describe('MultiTraceController', () => {
     // trace1 has a lower priority clock
     fakeAnalyzer.setResult(file1.name, {
       format: 'Perfetto',
-      clocks: [{name: 'BUILTIN_CLOCK_MONOTONIC', count: 1}],
+      clocks: [{name: 'MONOTONIC', count: 1}],
     });
     // trace2 has a higher priority clock
     fakeAnalyzer.setResult(file2.name, {
       format: 'Perfetto',
-      clocks: [{name: 'BUILTIN_CLOCK_BOOTTIME', count: 1}],
+      clocks: [{name: 'BOOTTIME', count: 1}],
     });
 
     await controller.addFiles([file1, file2]);
@@ -124,9 +124,6 @@ describe('MultiTraceController', () => {
 
     // Trace 2 should be root as it has the higher priority clock
     expect(trace2.syncConfig.syncMode).toEqual('ROOT');
-    // Trace 1 should sync to trace 2 (even though they don't share a clock,
-    // the logic will still try to connect them if possible, but the root
-    // selection is the key part of this test)
     // In this specific test, they can't sync, so trace1 will also be a root.
     expect(trace1.syncConfig.syncMode).toEqual('ROOT');
   });
@@ -190,11 +187,11 @@ describe('MultiTraceController', () => {
     const file2 = createMockFile('trace2.pftrace');
     fakeAnalyzer.setResult(file1.name, {
       format: 'Perfetto',
-      clocks: [{name: 'boottime', count: 1}],
+      clocks: [{name: 'BOOTTIME', count: 1}],
     });
     fakeAnalyzer.setResult(file2.name, {
       format: 'Perfetto',
-      clocks: [{name: 'monotonic', count: 1}],
+      clocks: [{name: 'MONOTONIC', count: 1}],
     });
 
     await controller.addFiles([file1, file2]);
@@ -208,9 +205,9 @@ describe('MultiTraceController', () => {
   });
 
   it('should respect a manual root', () => {
-    const trace1 = createMockTrace('uuid1', ['boottime']);
-    const trace2 = createMockTrace('uuid2', ['boottime'], 'MANUAL');
-    trace2.syncConfig = {syncMode: 'ROOT', rootClock: 'boottime'};
+    const trace1 = createMockTrace('uuid1', ['BOOTTIME']);
+    const trace2 = createMockTrace('uuid2', ['BOOTTIME'], 'MANUAL');
+    trace2.syncConfig = {syncMode: 'ROOT', rootClock: 'BOOTTIME'};
     (controller as any).wrappers = [{trace: trace1}, {trace: trace2}];
 
     controller.recomputeSync();
@@ -223,10 +220,10 @@ describe('MultiTraceController', () => {
   });
 
   it('should detect and report multiple manual roots', () => {
-    const trace1 = createMockTrace('uuid1', ['boottime'], 'MANUAL');
-    trace1.syncConfig = {syncMode: 'ROOT', rootClock: 'boottime'};
-    const trace2 = createMockTrace('uuid2', ['monotonic'], 'MANUAL');
-    trace2.syncConfig = {syncMode: 'ROOT', rootClock: 'monotonic'};
+    const trace1 = createMockTrace('uuid1', ['BOOTTIME'], 'MANUAL');
+    trace1.syncConfig = {syncMode: 'ROOT', rootClock: 'BOOTTIME'};
+    const trace2 = createMockTrace('uuid2', ['MONOTONIC'], 'MANUAL');
+    trace2.syncConfig = {syncMode: 'ROOT', rootClock: 'MONOTONIC'};
     (controller as any).wrappers = [{trace: trace1}, {trace: trace2}];
 
     controller.recomputeSync();
@@ -237,16 +234,16 @@ describe('MultiTraceController', () => {
   });
 
   it('should respect a manual sync configuration', () => {
-    const trace1 = createMockTrace('uuid1', ['boottime']);
-    const trace2 = createMockTrace('uuid2', ['monotonic'], 'MANUAL');
-    const trace3 = createMockTrace('uuid3', ['monotonic']);
+    const trace1 = createMockTrace('uuid1', ['BOOTTIME']);
+    const trace2 = createMockTrace('uuid2', ['MONOTONIC'], 'MANUAL');
+    const trace3 = createMockTrace('uuid3', ['MONOTONIC']);
 
     trace2.syncConfig = {
       syncMode: 'SYNC_TO_OTHER',
       syncClock: {
-        fromClock: 'monotonic',
+        fromClock: 'MONOTONIC',
         toTraceUuid: 'uuid1',
-        toClock: 'boottime',
+        toClock: 'BOOTTIME',
       },
     };
     (controller as any).wrappers = [
@@ -262,8 +259,8 @@ describe('MultiTraceController', () => {
       expect(trace2.syncConfig.syncClock?.toTraceUuid).toEqual('uuid1');
     }
     if (trace3.syncConfig.syncMode === 'SYNC_TO_OTHER') {
-      expect(trace3.syncConfig.syncClock?.toTraceUuid).toEqual('uuid1');
-      expect(trace3.syncConfig.syncClock?.fromClock).toEqual('boottime');
+      expect(trace3.syncConfig.syncClock?.toTraceUuid).toEqual('uuid2');
+      expect(trace3.syncConfig.syncClock?.fromClock).toEqual('MONOTONIC');
     }
   });
 });
