@@ -158,7 +158,8 @@ export class Modal implements m.ClassComponent<ModalAttrs> {
         `.modal-dialog${align}${customClass}${aria}`,
         m(
           'header',
-          m('.modal-title',
+          m(
+            '.modal-title',
             attrs.icon && m(Icon, {icon: attrs.icon}),
             m('h2', {id: 'mm-title'}, attrs.title),
           ),

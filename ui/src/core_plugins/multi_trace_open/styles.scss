@@ -82,12 +82,7 @@
     }
 
     &--analyzing::before {
-      width: 12px;
-      height: 12px;
-      border: 2px solid $primary-color-border;
-      border-top: 2px solid $primary-color;
-      background-color: transparent;
-      animation: spin 1s linear infinite;
+      display: none;
     }
 
     &--error::before {
@@ -170,11 +165,3 @@
   max-height: none;
 }
 
-@keyframes spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}

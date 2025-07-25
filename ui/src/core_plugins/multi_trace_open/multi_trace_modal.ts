@@ -20,6 +20,7 @@ import {Intent} from '../../widgets/common';
 import {Icon} from '../../widgets/icon';
 import {PopupPosition} from '../../widgets/popup';
 import {Select} from '../../widgets/select';
+import {Spinner} from '../../widgets/spinner';
 import {Stack} from '../../widgets/stack';
 import {Tooltip} from '../../widgets/tooltip';
 import {AppImpl} from '../../core/app_impl';
@@ -56,9 +57,7 @@ class MultiTraceModalComponent
         m(
           Stack,
           {className: 'pf-multi-trace-modal__list-panel'},
-          this.controller.traces.map((trace, index) =>
-            this.renderTraceItem(trace, index),
-          ),
+          this.controller.traces.map((trace) => this.renderTraceItem(trace)),
           m(
             CardStack,
             {
@@ -69,8 +68,10 @@ class MultiTraceModalComponent
             'Add more traces',
           ),
         ),
-        m('.pf-multi-trace-modal__separator'),
-        this.renderDetailsPanel(),
+        this.controller.selectedTrace && [
+          m('.pf-multi-trace-modal__separator'),
+          this.renderDetailsPanel(),
+        ],
       ),
       m(
         Stack,
@@ -82,10 +83,10 @@ class MultiTraceModalComponent
 
   // Main Renderers
   private renderDetailsPanel() {
-    if (!this.controller.selectedTrace) {
+    const trace = this.controller.selectedTrace;
+    if (!trace) {
       return undefined;
     }
-    const trace = this.controller.selectedTrace;
     return m(
       Stack,
       {className: 'pf-multi-trace-modal__details-panel'},
@@ -305,16 +306,16 @@ class MultiTraceModalComponent
   }
 
   // Sub-Renderers
-  private renderTraceItem(trace: TraceFile, index: number) {
+  private renderTraceItem(trace: TraceFile) {
     return m(
       CardStack,
       {
         className: 'pf-multi-trace-modal__card',
         direction: 'horizontal',
-        key: trace.file.name,
+        key: trace.uuid,
       },
       this.renderTraceInfo(trace),
-      this.renderCardActions(trace, index),
+      this.renderCardActions(trace.uuid),
     );
   }
 
@@ -366,16 +367,16 @@ class MultiTraceModalComponent
     );
   }
 
-  private renderCardActions(trace: TraceFile, index: number) {
+  private renderCardActions(uuid: string) {
     return m(
       '.pf-multi-trace-modal__actions',
       m(Button, {
         icon: 'edit',
-        onclick: () => (this.controller.selectedTrace = trace),
+        onclick: () => this.controller.selectTrace(uuid),
       }),
       m(Button, {
         icon: 'delete',
-        onclick: () => this.controller.removeTrace(index),
+        onclick: () => this.controller.removeTrace(uuid),
         disabled: isAnalyzing(this.controller.traces),
       }),
     );
@@ -392,7 +393,9 @@ class MultiTraceModalComponent
       {
         orientation: 'horizontal',
         className: 'pf-multi-trace-modal__status-wrapper',
+        spacing: 'small',
       },
+      trace.status === 'analyzing' && m(Spinner),
       m(
         '.pf-multi-trace-modal__status' + statusInfo.class,
         `${statusInfo.text}${progressText}`,
@@ -436,7 +439,7 @@ class MultiTraceModalComponent
   }
 }
 
-export function showMultiTraceModal(initialFiles: File[]) {
+export function showMultiTraceModal(initialFiles: ReadonlyArray<File>) {
   showModal({
     title: 'Open Multiple Traces',
     icon: 'library_books',
@@ -446,7 +449,7 @@ export function showMultiTraceModal(initialFiles: File[]) {
   });
 }
 
-function getTooltipText(traces: TraceFile[]): string {
+function getTooltipText(traces: ReadonlyArray<TraceFile>): string {
   if (traces.length === 0) {
     return 'Add at least one trace to open.';
   }
@@ -489,10 +492,10 @@ function getStatusInfo(status: TraceStatus) {
   }
 }
 
-function areAllTracesAnalyzed(traces: TraceFile[]): boolean {
+function areAllTracesAnalyzed(traces: ReadonlyArray<TraceFile>): boolean {
   return traces.every((trace) => trace.status === 'analyzed');
 }
 
-function isAnalyzing(traces: TraceFile[]): boolean {
+function isAnalyzing(traces: ReadonlyArray<TraceFile>): boolean {
   return traces.some((trace) => trace.status === 'analyzing');
 }

@@ -36,36 +36,56 @@ function mapTraceType(rawType: string): string {
   }
 }
 
+interface TraceFileWrapper {
+  trace: TraceFile;
+}
+
 export class MultiTraceController {
-  traces: TraceFile[] = [];
-  selectedTrace?: TraceFile;
+  private wrappers: TraceFileWrapper[] = [];
+  private selectedUuid?: string;
+
+  get traces(): ReadonlyArray<TraceFile> {
+    return this.wrappers.map((x) => x.trace);
+  }
+
+  get selectedTrace(): Readonly<TraceFile> | undefined {
+    return this.wrappers.find((w) => w.trace.uuid === this.selectedUuid)?.trace;
+  }
 
   async addFiles(files: ReadonlyArray<File>) {
-    const newTraces: TraceFile[] = Array.from(files).map((file) => ({
-      file,
-      uuid: uuidv4(),
-      status: 'not-analyzed',
+    const newTraces: TraceFileWrapper[] = Array.from(files).map((file) => ({
+      trace: {
+        file,
+        uuid: uuidv4(),
+        status: 'not-analyzed',
+      },
     }));
-    this.traces.push(...newTraces);
-    await Promise.all(newTraces.map((trace) => this.analyzeTrace(trace)));
+    this.wrappers.push(...newTraces);
+    await Promise.all(this.wrappers.map((trace) => this.analyzeTrace(trace)));
     redrawModal();
   }
 
-  removeTrace(index: number) {
-    const removedTrace = this.traces[index];
-    this.traces.splice(index, 1);
-    if (this.selectedTrace === removedTrace) {
-      this.selectedTrace = undefined;
+  selectTrace(uuid: string) {
+    this.selectedUuid = uuid;
+  }
+
+  removeTrace(uuid: string) {
+    const index = this.wrappers.findIndex((w) => w.trace.uuid === uuid);
+    if (index > -1) {
+      this.wrappers.splice(index, 1);
+    }
+    if (this.selectedUuid === uuid) {
+      this.selectedUuid = undefined;
     }
     redrawModal();
   }
 
-  private async analyzeTrace(trace: TraceFile) {
-    if (trace.status !== 'not-analyzed') {
+  private async analyzeTrace(wrapper: TraceFileWrapper) {
+    if (wrapper.trace.status !== 'not-analyzed') {
       return;
     }
-    trace = {
-      ...trace,
+    wrapper.trace = {
+      ...wrapper.trace,
       status: 'analyzing',
       progress: 0,
     };
@@ -79,10 +99,10 @@ export class MultiTraceController {
         analyzeTraceProtoContent: false,
         ftraceDropUntilAllCpusValid: false,
       });
-      const stream = new TraceFileStream(trace.file);
+      const stream = new TraceFileStream(wrapper.trace.file);
       for (;;) {
         const res = await stream.readChunk();
-        trace.progress = res.bytesRead / trace.file.size;
+        wrapper.trace.progress = res.bytesRead / wrapper.trace.file.size;
         redrawModal();
         await engine.parse(res.data);
         if (res.eof) {
@@ -103,8 +123,8 @@ export class MultiTraceController {
         leafNodes.push(it.trace_type);
       }
       if (leafNodes.length > 1) {
-        trace = {
-          ...trace,
+        wrapper.trace = {
+          ...wrapper.trace,
           status: 'error',
           error:
             'This trace contains multiple sub-traces, which is not supported because recursive synchronization is tricky. Please open each sub-trace individually.',
@@ -112,8 +132,8 @@ export class MultiTraceController {
         return;
       }
       if (leafNodes.length === 0) {
-        trace = {
-          ...trace,
+        wrapper.trace = {
+          ...wrapper.trace,
           status: 'error',
           error: 'Could not determine trace type',
         };
@@ -133,8 +153,8 @@ export class MultiTraceController {
       for (; clockIt.valid(); clockIt.next()) {
         clocks.push({name: clockIt.clock_name, count: clockIt.count});
       }
-      trace = {
-        ...trace,
+      wrapper.trace = {
+        ...wrapper.trace,
         status: 'analyzed',
         format: mapTraceType(leafNodes[0]),
         clocks: clocks,
@@ -144,8 +164,8 @@ export class MultiTraceController {
         },
       };
     } catch (e) {
-      trace = {
-        ...trace,
+      wrapper.trace = {
+        ...wrapper.trace,
         status: 'error',
         error: getErrorMessage(e),
       };
