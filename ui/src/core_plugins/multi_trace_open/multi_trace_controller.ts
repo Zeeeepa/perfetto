@@ -13,17 +13,14 @@
 // limitations under the License.
 
 import {
-  ClockInfo,
   SyncConfig,
   TraceFile,
   TraceFileAnalyzed,
 } from './multi_trace_types';
-import {WasmEngineProxy} from '../../trace_processor/wasm_engine_proxy';
 import {uuidv4} from '../../base/uuid';
 import {redrawModal} from '../../widgets/modal';
-import {TraceFileStream} from '../../core/trace_stream';
-import {NUM, STR} from '../../trace_processor/query_result';
 import {assertExists} from '../../base/logging';
+import {TraceAnalyzer} from './trace_analyzer';
 
 function getErrorMessage(e: unknown): string {
   const err = e instanceof Error ? e.message : `${e}`;
@@ -33,23 +30,30 @@ function getErrorMessage(e: unknown): string {
   return err;
 }
 
-function mapTraceType(rawType: string): string {
-  switch (rawType) {
-    case 'proto':
-      return 'Perfetto';
-    default:
-      return rawType;
-  }
-}
-
 interface TraceFileWrapper {
   trace: TraceFile;
 }
 
+const PREFERRED_ROOT_CLOCKS = [
+  'BOOTTIME',
+  'MONOTONIC',
+  'MONOTONIC_RAW',
+  'MONOTONIC_COARSE',
+  'TSC',
+  'REALTIME',
+  'REALTIME_COARSE',
+  'PERF',
+];
+
 export class MultiTraceController {
   private wrappers: TraceFileWrapper[] = [];
   private selectedUuid?: string;
+  private traceAnalyzer: TraceAnalyzer;
   syncError?: string;
+
+  constructor(traceAnalyzer: TraceAnalyzer) {
+    this.traceAnalyzer = traceAnalyzer;
+  }
 
   get traces(): ReadonlyArray<TraceFile> {
     return this.wrappers.map((x) => x.trace);
@@ -146,18 +150,16 @@ export class MultiTraceController {
     if (manualRoots.length === 1) {
       rootUuid = manualRoots[0].uuid;
     } else if (analyzedTraces.length > 0) {
-      // Heuristic: pick the trace with the most connections as the root.
-      // Only consider automatic traces for this heuristic if there's no manual
-      // root.
       const tracesForHeuristic =
         automaticTraces.length > 0 ? automaticTraces : analyzedTraces;
-      if (tracesForHeuristic.length > 0) {
-        rootUuid = tracesForHeuristic.reduce((a, b) => {
-          return (adj.get(a.uuid)?.length ?? 0) >
-            (adj.get(b.uuid)?.length ?? 0)
-            ? a
-            : b;
-        }).uuid;
+      for (const clock of PREFERRED_ROOT_CLOCKS) {
+        const traceWithClock = tracesForHeuristic.find((t) =>
+          t.clocks.some((c) => c.name === clock),
+        );
+        if (traceWithClock) {
+          rootUuid = traceWithClock.uuid;
+          break;
+        }
       }
     }
 
@@ -184,9 +186,13 @@ export class MultiTraceController {
     // Set root config for the root trace if it's in automatic mode
     const rootTrace = analyzedTraces.find((t) => t.uuid === rootUuid)!;
     if (rootTrace.syncMode === 'AUTOMATIC') {
+      const rootTraceClocks = new Set(rootTrace.clocks.map((c) => c.name));
+      const bestClock = PREFERRED_ROOT_CLOCKS.find((c) =>
+        rootTraceClocks.has(c),
+      );
       newConfigs.set(rootUuid, {
         syncMode: 'ROOT',
-        rootClock: rootTrace.clocks[0]?.name ?? '', // Default to first clock
+        rootClock: bestClock ?? rootTrace.clocks[0]?.name ?? '',
       });
     }
 
@@ -203,17 +209,26 @@ export class MultiTraceController {
           if (childTrace.syncMode === 'AUTOMATIC') {
             const parentClocks = assertExists(clocksByUuid.get(parentUuid));
             const childClocks = assertExists(clocksByUuid.get(childUuid));
-            const commonClock = [...parentClocks].find((clock) =>
-              childClocks.has(clock),
-            );
 
-            if (commonClock) {
+            // Find the best common clock based on the preferred order
+            let bestCommonClock: string | undefined = undefined;
+            for (const preferredClock of PREFERRED_ROOT_CLOCKS) {
+              if (
+                parentClocks.has(preferredClock) &&
+                childClocks.has(preferredClock)
+              ) {
+                bestCommonClock = preferredClock;
+                break;
+              }
+            }
+
+            if (bestCommonClock) {
               newConfigs.set(childUuid, {
                 syncMode: 'SYNC_TO_OTHER',
                 syncClock: {
-                  fromClock: commonClock,
+                  fromClock: bestCommonClock,
                   toTraceUuid: parentUuid,
-                  toClock: commonClock,
+                  toClock: bestCommonClock,
                 },
               });
             }
@@ -251,73 +266,21 @@ export class MultiTraceController {
     };
     redrawModal();
     try {
-      using engine = new WasmEngineProxy(uuidv4());
-      engine.resetTraceProcessor({
-        tokenizeOnly: true,
-        cropTrackEvents: false,
-        ingestFtraceInRawTable: false,
-        analyzeTraceProtoContent: false,
-        ftraceDropUntilAllCpusValid: false,
-      });
-      const stream = new TraceFileStream(wrapper.trace.file);
-      for (;;) {
-        const res = await stream.readChunk();
-        wrapper.trace.progress = res.bytesRead / wrapper.trace.file.size;
-        redrawModal();
-        await engine.parse(res.data);
-        if (res.eof) {
-          await engine.notifyEof();
-          break;
-        }
-      }
-      const result = await engine.query(`
-          SELECT
-            parent.trace_type
-          FROM __intrinsic_trace_file parent
-          LEFT JOIN __intrinsic_trace_file child ON parent.id = child.parent_id
-          WHERE child.id IS NULL
-        `);
-      const it = result.iter({trace_type: STR});
-      const leafNodes = [];
-      for (; it.valid(); it.next()) {
-        leafNodes.push(it.trace_type);
-      }
-      if (leafNodes.length > 1) {
-        wrapper.trace = {
-          ...wrapper.trace,
-          status: 'error',
-          error:
-            'This trace contains multiple sub-traces, which is not supported because recursive synchronization is tricky. Please open each sub-trace individually.',
-        };
-        return;
-      }
-      if (leafNodes.length === 0) {
-        wrapper.trace = {
-          ...wrapper.trace,
-          status: 'error',
-          error: 'Could not determine trace type',
-        };
-        return;
-      }
+      const result = await this.traceAnalyzer.analyze(
+        wrapper.trace.file,
+        (progress) => {
+          if (wrapper.trace.status === 'analyzing') {
+            wrapper.trace.progress = progress;
+            redrawModal();
+          }
+        },
+      );
 
-      // Also query for the clocks in this trace
-      const clocksResult = await engine.query(`
-          SELECT clock_name, COUNT(*) as count
-          FROM clock_snapshot
-          WHERE clock_name IS NOT NULL
-          GROUP BY clock_name
-          ORDER BY count DESC
-        `);
-      const clocks: ClockInfo[] = [];
-      const clockIt = clocksResult.iter({clock_name: STR, count: NUM});
-      for (; clockIt.valid(); clockIt.next()) {
-        clocks.push({name: clockIt.clock_name, count: clockIt.count});
-      }
       wrapper.trace = {
         ...wrapper.trace,
         status: 'analyzed',
-        format: mapTraceType(leafNodes[0]),
-        clocks: clocks,
+        format: result.format,
+        clocks: result.clocks,
         syncMode: 'AUTOMATIC',
         // Default config, will be overwritten by recomputeSync
         syncConfig: {

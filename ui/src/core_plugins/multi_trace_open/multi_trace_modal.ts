@@ -33,6 +33,7 @@ import {
   TraceStatus,
 } from './multi_trace_types';
 import {MultiTraceController} from './multi_trace_controller';
+import {WasmTraceAnalyzer} from './trace_analyzer';
 
 const MODAL_KEY = 'multi-trace-modal';
 
@@ -43,7 +44,7 @@ interface MultiTraceModalAttrs {
 class MultiTraceModalComponent
   implements m.ClassComponent<MultiTraceModalAttrs>
 {
-  private controller = new MultiTraceController();
+  private controller = new MultiTraceController(new WasmTraceAnalyzer());
 
   // Lifecycle
   oncreate({attrs}: m.Vnode<MultiTraceModalAttrs>) {

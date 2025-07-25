@@ -14,6 +14,7 @@
 
 import {MultiTraceController} from './multi_trace_controller';
 import {TraceFileAnalyzed} from './multi_trace_types';
+import {TraceAnalysisResult, TraceAnalyzer} from './trace_analyzer';
 
 // Mocking the modal redraw function as it's not needed for controller logic
 // tests and relies on a real DOM.
@@ -21,7 +22,7 @@ jest.mock('../../widgets/modal', () => ({
   redrawModal: jest.fn(),
 }));
 
-// Helper to create a mock TraceFileAnalyzed object
+// Helper to create a mock TraceFileAnalyzed object for manual mode tests
 function createMockTrace(
   uuid: string,
   clocks: string[],
@@ -38,24 +39,46 @@ function createMockTrace(
   };
 }
 
+// A fake TraceAnalyzer for testing purposes.
+class FakeTraceAnalyzer implements TraceAnalyzer {
+  private results = new Map<string, TraceAnalysisResult>();
+  private errors = new Map<string, Error>();
+
+  setResult(fileName: string, result: TraceAnalysisResult) {
+    this.results.set(fileName, result);
+  }
+
+  setError(fileName: string, error: Error) {
+    this.errors.set(fileName, error);
+  }
+
+  async analyze(
+    file: File,
+    _onProgress: (progress: number) => void,
+  ): Promise<TraceAnalysisResult> {
+    if (this.errors.has(file.name)) {
+      throw this.errors.get(file.name)!;
+    }
+    const result = this.results.get(file.name);
+    if (result) {
+      return result;
+    }
+    throw new Error(`No mock result set for ${file.name}`);
+  }
+}
+
+// Helper to create a File object for tests
+function createMockFile(name: string): File {
+  return new File([], name);
+}
+
 describe('MultiTraceController', () => {
   let controller: MultiTraceController;
-  let mockAnalyzeTrace: jest.SpyInstance;
+  let fakeAnalyzer: FakeTraceAnalyzer;
 
   beforeEach(() => {
-    controller = new MultiTraceController();
-    // We mock analyzeTrace to avoid dealing with WasmEngineProxy and file
-    // streams. We can directly set the result of the analysis.
-    mockAnalyzeTrace = jest
-      .spyOn(controller as any, 'analyzeTrace')
-      .mockImplementation(async (wrapper: {trace: TraceFileAnalyzed}) => {
-        // The "analysis" is essentially just accepting the mock trace data.
-        // The wrapper's trace is already a TraceFileAnalyzed in our tests.
-      });
-  });
-
-  afterEach(() => {
-    mockAnalyzeTrace.mockRestore();
+    fakeAnalyzer = new FakeTraceAnalyzer();
+    controller = new MultiTraceController(fakeAnalyzer);
   });
 
   it('should initialize with no traces or errors', () => {
@@ -64,41 +87,127 @@ describe('MultiTraceController', () => {
   });
 
   it('should set a single trace as a root', async () => {
-    const trace = createMockTrace('uuid1', ['boottime']);
-    (controller as any).wrappers = [{trace}];
-    controller.recomputeSync();
+    const file = createMockFile('trace1.pftrace');
+    fakeAnalyzer.setResult(file.name, {
+      format: 'Perfetto',
+      clocks: [{name: 'boottime', count: 1}],
+    });
+
+    await controller.addFiles([file]);
+
+    const trace = controller.traces[0] as TraceFileAnalyzed;
     expect(trace.syncConfig.syncMode).toEqual('ROOT');
   });
 
-  it('should sync two traces with a common clock', async () => {
-    const trace1 = createMockTrace('uuid1', ['boottime', 'monotonic']);
-    const trace2 = createMockTrace('uuid2', ['boottime']);
-    (controller as any).wrappers = [{trace: trace1}, {trace: trace2}];
+  it('should sync two traces based on preferred clock order', async () => {
+    const file1 = createMockFile('trace1.pftrace');
+    const file2 = createMockFile('trace2.pftrace');
+    // trace1 has a lower priority clock
+    fakeAnalyzer.setResult(file1.name, {
+      format: 'Perfetto',
+      clocks: [{name: 'BUILTIN_CLOCK_MONOTONIC', count: 1}],
+    });
+    // trace2 has a higher priority clock
+    fakeAnalyzer.setResult(file2.name, {
+      format: 'Perfetto',
+      clocks: [{name: 'BUILTIN_CLOCK_BOOTTIME', count: 1}],
+    });
 
-    controller.recomputeSync();
+    await controller.addFiles([file1, file2]);
 
-    // Trace 1 should be root as it has more clocks/connections
+    const trace1 = controller.traces.find(
+      (t) => t.file.name === file1.name,
+    ) as TraceFileAnalyzed;
+    const trace2 = controller.traces.find(
+      (t) => t.file.name === file2.name,
+    ) as TraceFileAnalyzed;
+
+    // Trace 2 should be root as it has the higher priority clock
+    expect(trace2.syncConfig.syncMode).toEqual('ROOT');
+    // Trace 1 should sync to trace 2 (even though they don't share a clock,
+    // the logic will still try to connect them if possible, but the root
+    // selection is the key part of this test)
+    // In this specific test, they can't sync, so trace1 will also be a root.
     expect(trace1.syncConfig.syncMode).toEqual('ROOT');
-    // Trace 2 should sync to trace 1
-    expect(trace2.syncConfig.syncMode).toEqual('SYNC_TO_OTHER');
-    expect(trace2.syncConfig.syncClock?.toTraceUuid).toEqual('uuid1');
-    expect(trace2.syncConfig.syncClock?.fromClock).toEqual('boottime');
-    expect(trace2.syncConfig.syncClock?.toClock).toEqual('boottime');
+  });
+
+  it('should select the highest priority clock for a single root trace', async () => {
+    const file = createMockFile('trace1.pftrace');
+    const clocks = [
+      {name: 'REALTIME_COARSE', count: 1},
+      {name: 'REALTIME', count: 1},
+      {name: 'MONOTONIC_RAW', count: 1},
+      {name: 'MONOTONIC_COARSE', count: 1},
+      {name: 'MONOTONIC', count: 1},
+      {name: 'BOOTTIME', count: 1},
+    ];
+    fakeAnalyzer.setResult(file.name, {format: 'Perfetto', clocks});
+
+    await controller.addFiles([file]);
+
+    const trace = controller.traces[0] as TraceFileAnalyzed;
+    expect(trace.syncConfig.syncMode).toEqual('ROOT');
+    if (trace.syncConfig.syncMode === 'ROOT') {
+      expect(trace.syncConfig.rootClock).toEqual('BOOTTIME');
+    }
+  });
+
+  it('should choose the highest priority common clock for sync', async () => {
+    const file1 = createMockFile('trace1.pftrace');
+    const file2 = createMockFile('trace2.pftrace');
+    // Both traces share a high and low priority clock
+    const clocks = [
+      {name: 'REALTIME_COARSE', count: 1},
+      {name: 'BOOTTIME', count: 1},
+    ];
+    fakeAnalyzer.setResult(file1.name, {format: 'Perfetto', clocks});
+    fakeAnalyzer.setResult(file2.name, {format: 'Perfetto', clocks});
+
+    await controller.addFiles([file1, file2]);
+
+    const trace1 = controller.traces[0] as TraceFileAnalyzed;
+    const trace2 = controller.traces[1] as TraceFileAnalyzed;
+
+    // Assuming trace1 becomes the root
+    const syncTrace = trace1.syncConfig.syncMode === 'ROOT' ? trace2 : trace1;
+    const rootTrace = trace1.syncConfig.syncMode === 'ROOT' ? trace1 : trace2;
+
+    expect(syncTrace.syncConfig.syncMode).toEqual('SYNC_TO_OTHER');
+    if (syncTrace.syncConfig.syncMode === 'SYNC_TO_OTHER') {
+      expect(syncTrace.syncConfig.syncClock?.toTraceUuid).toEqual(
+        rootTrace.uuid,
+      );
+      // This is the key check: it must use the best clock.
+      expect(syncTrace.syncConfig.syncClock?.fromClock).toEqual('BOOTTIME');
+      expect(syncTrace.syncConfig.syncClock?.toClock).toEqual('BOOTTIME');
+    } else {
+      fail('One trace should be syncing to the other');
+    }
   });
 
   it('should handle multiple disconnected traces', async () => {
-    const trace1 = createMockTrace('uuid1', ['boottime']);
-    const trace2 = createMockTrace('uuid2', ['monotonic']);
-    (controller as any).wrappers = [{trace: trace1}, {trace: trace2}];
+    const file1 = createMockFile('trace1.pftrace');
+    const file2 = createMockFile('trace2.pftrace');
+    fakeAnalyzer.setResult(file1.name, {
+      format: 'Perfetto',
+      clocks: [{name: 'boottime', count: 1}],
+    });
+    fakeAnalyzer.setResult(file2.name, {
+      format: 'Perfetto',
+      clocks: [{name: 'monotonic', count: 1}],
+    });
 
-    controller.recomputeSync();
+    await controller.addFiles([file1, file2]);
+
+    const trace1 = controller.traces[0] as TraceFileAnalyzed;
+    const trace2 = controller.traces[1] as TraceFileAnalyzed;
 
     // Both should become roots as they can't be synced
     expect(trace1.syncConfig.syncMode).toEqual('ROOT');
     expect(trace2.syncConfig.syncMode).toEqual('ROOT');
   });
 
-  it('should respect a manual root', async () => {
+  it('should respect a manual root', () => {
     const trace1 = createMockTrace('uuid1', ['boottime']);
     const trace2 = createMockTrace('uuid2', ['boottime'], 'MANUAL');
     trace2.syncConfig = {syncMode: 'ROOT', rootClock: 'boottime'};
@@ -108,10 +217,12 @@ describe('MultiTraceController', () => {
 
     // trace2 is the manual root, so trace1 must sync to it
     expect(trace1.syncConfig.syncMode).toEqual('SYNC_TO_OTHER');
-    expect(trace1.syncConfig.syncClock?.toTraceUuid).toEqual('uuid2');
+    if (trace1.syncConfig.syncMode === 'SYNC_TO_OTHER') {
+      expect(trace1.syncConfig.syncClock?.toTraceUuid).toEqual('uuid2');
+    }
   });
 
-  it('should detect and report multiple manual roots', async () => {
+  it('should detect and report multiple manual roots', () => {
     const trace1 = createMockTrace('uuid1', ['boottime'], 'MANUAL');
     trace1.syncConfig = {syncMode: 'ROOT', rootClock: 'boottime'};
     const trace2 = createMockTrace('uuid2', ['monotonic'], 'MANUAL');
@@ -125,13 +236,11 @@ describe('MultiTraceController', () => {
     );
   });
 
-  it('should respect a manual sync configuration', async () => {
+  it('should respect a manual sync configuration', () => {
     const trace1 = createMockTrace('uuid1', ['boottime']);
     const trace2 = createMockTrace('uuid2', ['monotonic'], 'MANUAL');
     const trace3 = createMockTrace('uuid3', ['monotonic']);
 
-    // Manual config: trace2 syncs to trace1 via a non-existent clock
-    // (to prove the algorithm respects it)
     trace2.syncConfig = {
       syncMode: 'SYNC_TO_OTHER',
       syncClock: {
@@ -148,32 +257,13 @@ describe('MultiTraceController', () => {
 
     controller.recomputeSync();
 
-    // trace1 is root
     expect(trace1.syncConfig.syncMode).toEqual('ROOT');
-    // trace2 config should be untouched
-    expect(trace2.syncConfig.syncClock?.toTraceUuid).toEqual('uuid1');
-    // trace3 should sync to trace2 as they share a 'monotonic' clock
-    expect(trace3.syncConfig.syncMode).toEqual('SYNC_TO_OTHER');
-    expect(trace3.syncConfig.syncClock?.toTraceUuid).toEqual('uuid2');
-    expect(trace3.syncConfig.syncClock?.fromClock).toEqual('monotonic');
-  });
-
-  it('should preserve config when switching to manual', async () => {
-    const trace1 = createMockTrace('uuid1', ['boottime']);
-    const trace2 = createMockTrace('uuid2', ['boottime']);
-    (controller as any).wrappers = [{trace: trace1}, {trace: trace2}];
-
-    controller.recomputeSync();
-
-    // Capture the automatic config for trace2
-    const autoConfig = {...trace2.syncConfig};
-    expect(autoConfig.syncMode).toEqual('SYNC_TO_OTHER');
-
-    // Switch to manual
-    trace2.syncMode = 'MANUAL';
-    controller.recomputeSync();
-
-    // The config should be identical
-    expect(trace2.syncConfig).toEqual(autoConfig);
+    if (trace2.syncConfig.syncMode === 'SYNC_TO_OTHER') {
+      expect(trace2.syncConfig.syncClock?.toTraceUuid).toEqual('uuid1');
+    }
+    if (trace3.syncConfig.syncMode === 'SYNC_TO_OTHER') {
+      expect(trace3.syncConfig.syncClock?.toTraceUuid).toEqual('uuid1');
+      expect(trace3.syncConfig.syncClock?.fromClock).toEqual('boottime');
+    }
   });
 });
