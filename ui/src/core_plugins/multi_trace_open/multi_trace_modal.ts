@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 import {closeModal, redrawModal, showModal} from '../../widgets/modal';
-import {Button, ButtonGroup, ButtonVariant} from '../../widgets/button';
+import {Button, ButtonVariant} from '../../widgets/button';
 import {CardStack} from '../../widgets/card';
 import {Intent} from '../../widgets/common';
 import {Icon} from '../../widgets/icon';
@@ -22,10 +22,16 @@ import {PopupPosition} from '../../widgets/popup';
 import {Select} from '../../widgets/select';
 import {Spinner} from '../../widgets/spinner';
 import {Stack} from '../../widgets/stack';
+import {Switch} from '../../widgets/switch';
 import {Tooltip} from '../../widgets/tooltip';
 import {AppImpl} from '../../core/app_impl';
 import {MiddleEllipsis} from '../../widgets/middle_ellipsis';
-import {TraceFile, TraceFileAnalyzed, TraceStatus} from './multi_trace_types';
+import {
+  SyncConfig,
+  TraceFile,
+  TraceFileAnalyzed,
+  TraceStatus,
+} from './multi_trace_types';
 import {MultiTraceController} from './multi_trace_controller';
 
 const MODAL_KEY = 'multi-trace-modal';
@@ -92,200 +98,271 @@ class MultiTraceModalComponent
       {className: 'pf-multi-trace-modal__details-panel'},
       m('h3.pf-multi-trace-modal__details-header', trace.file.name),
       trace.status === 'analyzed'
-        ? m(
-            Stack,
-            {
-              className: 'pf-multi-trace-modal__details-content',
-            },
-            this.renderSyncModeSelector(trace),
-            trace.syncMode === 'MANUAL'
-              ? trace.syncConfig.syncMode === 'ROOT'
-                ? this.renderRootClockSelector(trace)
-                : this.renderSyncToOtherSelector(trace)
-              : this.renderAutomaticSyncDetails(trace),
-          )
+        ? this.renderAnalyzedDetails(trace)
         : m('span', 'TODO add viz depending on status'),
     );
   }
 
-  private renderSyncModeSelector(trace: TraceFileAnalyzed) {
+  private renderAnalyzedDetails(trace: TraceFileAnalyzed) {
+    const isManual = trace.syncMode === 'MANUAL';
+    const config = trace.syncConfig;
+
+    return m(
+      Stack,
+      {
+        className: 'pf-multi-trace-modal__details-content',
+      },
+      this.renderSyncModeSelector(trace),
+      this.renderDetailRow(
+        'Role',
+        isManual
+          ? this.renderRoleSelector(trace)
+          : m(
+              'span.pf-multi-trace-modal__static-select',
+              config.syncMode === 'ROOT'
+                ? 'Root clock provider'
+                : 'Synced to another trace',
+            ),
+      ),
+      config.syncMode === 'ROOT'
+        ? this.renderRootTraceDetails(trace, isManual)
+        : this.renderSyncedTraceDetails(trace, isManual),
+    );
+  }
+
+  private renderRootTraceDetails(trace: TraceFileAnalyzed, isManual: boolean) {
+    if (trace.syncConfig.syncMode !== 'ROOT') return [];
+    const config = trace.syncConfig;
+    return [
+      this.renderDetailRow(
+        'Root Clock',
+        isManual
+          ? this.renderRootClockSelector(trace)
+          : m('span.pf-multi-trace-modal__static-select', config.rootClock),
+      ),
+    ];
+  }
+
+  private renderSyncedTraceDetails(
+    trace: TraceFileAnalyzed,
+    isManual: boolean,
+  ) {
+    if (trace.syncConfig.syncMode !== 'SYNC_TO_OTHER') return [];
+    const config = trace.syncConfig;
+    const otherTraces = this.controller.traces.filter(
+      (t) => t.uuid !== trace.uuid,
+    );
+
+    const targetTraceName =
+      this.controller.traces.find(
+        (t) => t.uuid === config.syncClock?.toTraceUuid,
+      )?.file.name ?? 'Not set';
+
+    return [
+      this.renderDetailRow(
+        'Source Clock',
+        isManual
+          ? this.renderSourceClockSelector(trace)
+          : m(
+              'span.pf-multi-trace-modal__static-select',
+              config.syncClock?.fromClock ?? 'Not set',
+            ),
+      ),
+      this.renderDetailRow(
+        'Target Trace',
+        isManual
+          ? this.renderTargetTraceSelector(trace, otherTraces)
+          : m('span.pf-multi-trace-modal__static-select', targetTraceName),
+      ),
+      this.renderDetailRow(
+        'Target Clock',
+        isManual
+          ? this.renderTargetClockSelector(trace)
+          : m(
+              'span.pf-multi-trace-modal__static-select',
+              config.syncClock?.toClock ?? 'Not set',
+            ),
+      ),
+    ];
+  }
+
+  private renderDetailRow(label: string, content: m.Children) {
     return m(
       Stack,
       {className: 'pf-multi-trace-modal__form-group'},
-      m('label', 'Sync Mode'),
-      m(
-        ButtonGroup,
-        m(Button, {
-          label: 'Automatic',
-          active: trace.syncMode === 'AUTOMATIC',
-          onclick: () => {
-            trace.syncMode = 'AUTOMATIC';
-          },
-        }),
-        m(Button, {
-          label: 'Manual',
-          active: trace.syncMode === 'MANUAL',
-          onclick: () => {
-            trace.syncMode = 'MANUAL';
-          },
-        }),
-      ),
+      m('label', label),
+      content,
+    );
+  }
+
+  private renderRoleSelector(trace: TraceFileAnalyzed) {
+    return m(
+      Select,
+      {
+        value: trace.syncConfig.syncMode,
+        onchange: (e: Event) => {
+          const target = e.target as HTMLSelectElement;
+          const newSyncMode = target.value as SyncConfig['syncMode'];
+          if (newSyncMode === 'ROOT') {
+            trace.syncConfig = {
+              syncMode: 'ROOT',
+              rootClock: '',
+            };
+          } else {
+            trace.syncConfig = {
+              syncMode: 'SYNC_TO_OTHER',
+            };
+          }
+          this.controller.recomputeSync();
+          redrawModal();
+        },
+      },
+      m('option', {value: 'ROOT'}, 'Root clock provider'),
+      m('option', {value: 'SYNC_TO_OTHER'}, 'Synced to another trace'),
     );
   }
 
   private renderRootClockSelector(trace: TraceFileAnalyzed) {
-    if (trace.syncConfig.syncMode !== 'ROOT') {
-      return;
-    }
+    if (trace.syncConfig.syncMode !== 'ROOT') return;
     return m(
-      Stack,
-      {className: 'pf-multi-trace-modal__form-group'},
-      m('label', 'Root Clock'),
-      m(
-        Select,
-        {
-          value: trace.syncConfig.rootClock,
-          onchange: (e: Event) => {
-            const target = e.target as HTMLSelectElement;
-            trace.syncConfig = {
-              syncMode: 'ROOT',
-              rootClock: target.value,
-            };
-          },
+      Select,
+      {
+        value: trace.syncConfig.rootClock,
+        onchange: (e: Event) => {
+          const target = e.target as HTMLSelectElement;
+          trace.syncConfig = {
+            syncMode: 'ROOT',
+            rootClock: target.value,
+          };
+          this.controller.recomputeSync();
         },
-        m('option', {value: ''}, 'Select a clock'),
-        trace.clocks.map((clock) =>
-          m('option', {value: clock.name}, clock.name),
-        ),
-      ),
+      },
+      m('option', {value: ''}, 'Select a clock'),
+      trace.clocks.map((clock) => m('option', {value: clock.name}, clock.name)),
     );
   }
 
-  private renderAutomaticSyncDetails(trace: TraceFileAnalyzed) {
-    const config = trace.syncConfig;
-    if (config.syncMode === 'ROOT') {
-      return m(
-        Stack,
-        {className: 'pf-multi-trace-modal__form-group'},
-        m('label', 'Role'),
-        m('span', 'Root clock provider'),
-        m('label', 'Root Clock'),
-        m('span', config.rootClock),
-      );
-    } else {
-      return m(
-        Stack,
-        {className: 'pf-multi-trace-modal__form-group'},
-        m('label', 'Role'),
-        m('span', 'Synced to another trace'),
-        m('label', 'Source Clock'),
-        m('span', config.syncClock?.fromClock ?? 'Not set'),
-        m('label', 'Target Trace'),
-        m('span', trace.file.name ?? 'Not set'),
-        m('label', 'Target Clock'),
-        m('span', config.syncClock?.toClock ?? 'Not set'),
-      );
-    }
-  }
-
-  private renderSyncToOtherSelector(trace: TraceFileAnalyzed) {
+  private renderSourceClockSelector(trace: TraceFileAnalyzed) {
     const syncConfig = trace.syncConfig;
-    if (syncConfig.syncMode !== 'SYNC_TO_OTHER') {
-      return;
-    }
-    const otherTraces = this.controller.traces.filter(
-      (t) => t.uuid !== trace.uuid,
+    if (syncConfig.syncMode !== 'SYNC_TO_OTHER') return;
+    return m(
+      Select,
+      {
+        value: syncConfig.syncClock?.fromClock ?? '',
+        onchange: (e: Event) => {
+          const target = e.target as HTMLSelectElement;
+          trace.syncConfig = {
+            syncMode: 'SYNC_TO_OTHER',
+            syncClock: {
+              ...(syncConfig.syncClock ?? {
+                toTraceUuid: '',
+                toClock: '',
+              }),
+              fromClock: target.value,
+            },
+          };
+          this.controller.recomputeSync();
+        },
+      },
+      m('option', {value: ''}, 'Select a clock'),
+      (trace.clocks ?? []).map((clock) =>
+        m('option', {value: clock.name}, clock.name),
+      ),
     );
-    return [
-      m(
-        Stack,
-        {className: 'pf-multi-trace-modal__form-group'},
-        m('label', 'Source Clock'),
-        m(
-          Select,
-          {
-            value: syncConfig.syncClock?.fromClock ?? '',
-            onchange: (e: Event) => {
-              const target = e.target as HTMLSelectElement;
-              trace.syncConfig = {
-                syncMode: 'SYNC_TO_OTHER',
-                syncClock: {
-                  ...(syncConfig.syncClock ?? {
-                    toTraceUuid: '',
-                    toClock: '',
-                  }),
-                  fromClock: target.value,
-                },
-              };
+  }
+
+  private renderTargetTraceSelector(
+    trace: TraceFileAnalyzed,
+    otherTraces: TraceFile[],
+  ) {
+    const syncConfig = trace.syncConfig;
+    if (syncConfig.syncMode !== 'SYNC_TO_OTHER') return;
+    return m(
+      Select,
+      {
+        value: syncConfig.syncClock?.toTraceUuid ?? '',
+        onchange: (e: Event) => {
+          const target = e.target as HTMLSelectElement;
+          trace.syncConfig = {
+            syncMode: 'SYNC_TO_OTHER',
+            syncClock: {
+              ...(syncConfig.syncClock ?? {fromClock: ''}),
+              toTraceUuid: target.value,
+              toClock: '', // Reset target clock when target trace changes
             },
-          },
-          m('option', {value: ''}, 'Select a clock'),
-          (trace.clocks ?? []).map((clock) =>
-            m('option', {value: clock.name}, clock.name),
-          ),
-        ),
+          };
+          this.controller.recomputeSync();
+          redrawModal();
+        },
+      },
+      m('option', {value: ''}, 'Select a trace'),
+      otherTraces.map((other) =>
+        m('option', {value: other.uuid}, other.file.name),
       ),
-      m(
-        Stack,
-        {className: 'pf-multi-trace-modal__form-group'},
-        m('label', 'Target Trace'),
-        m(
-          Select,
-          {
-            value: syncConfig.syncClock?.toTraceUuid ?? '',
-            onchange: (e: Event) => {
-              const target = e.target as HTMLSelectElement;
-              trace.syncConfig = {
-                syncMode: 'SYNC_TO_OTHER',
-                syncClock: {
-                  ...(syncConfig.syncClock ?? {fromClock: ''}),
-                  toTraceUuid: target.value,
-                  toClock: '', // Reset target clock when target trace changes
-                },
-              };
-              redrawModal();
+    );
+  }
+
+  private renderTargetClockSelector(trace: TraceFileAnalyzed) {
+    const syncConfig = trace.syncConfig;
+    if (syncConfig.syncMode !== 'SYNC_TO_OTHER') return;
+
+    const isTargetTraceSelected = !!syncConfig.syncClock?.toTraceUuid;
+
+    const targetTrace = isTargetTraceSelected
+      ? (this.controller.traces.find(
+          (t) => t.uuid === syncConfig.syncClock?.toTraceUuid,
+        ) as TraceFileAnalyzed | undefined)
+      : undefined;
+
+    return m(
+      Select,
+      {
+        disabled: !isTargetTraceSelected,
+        value: syncConfig.syncClock?.toClock ?? '',
+        onchange: (e: Event) => {
+          const target = e.target as HTMLSelectElement;
+          trace.syncConfig = {
+            syncMode: 'SYNC_TO_OTHER',
+            syncClock: {
+              ...(syncConfig.syncClock ?? {
+                fromClock: '',
+                toTraceUuid: '',
+              }),
+              toClock: target.value,
             },
-          },
-          m('option', {value: ''}, 'Select a trace'),
-          otherTraces.map((other) =>
-            m('option', {value: other.uuid}, other.file.name),
-          ),
-        ),
-      ),
-      syncConfig.syncClock?.toTraceUuid &&
-        m(
-          Stack,
-          {className: 'pf-multi-trace-modal__form-group'},
-          m('label', 'Target Clock'),
-          m(
-            Select,
-            {
-              value: syncConfig.syncClock?.toClock ?? '',
-              onchange: (e: Event) => {
-                const target = e.target as HTMLSelectElement;
-                trace.syncConfig = {
-                  syncMode: 'SYNC_TO_OTHER',
-                  syncClock: {
-                    ...(syncConfig.syncClock ?? {
-                      fromClock: '',
-                      toTraceUuid: '',
-                    }),
-                    toClock: target.value,
-                  },
-                };
-              },
-            },
+          };
+          this.controller.recomputeSync();
+        },
+      },
+      isTargetTraceSelected
+        ? [
             m('option', {value: ''}, 'Select a clock'),
-            (
-              this.controller.traces.find(
-                (t) => t.uuid === syncConfig.syncClock?.toTraceUuid,
-              ) as TraceFileAnalyzed | undefined
-            )?.clocks.map((clock) =>
+            (targetTrace?.clocks ?? []).map((clock) =>
               m('option', {value: clock.name}, clock.name),
             ),
+          ]
+        : m(
+            'option',
+            {value: '', disabled: true, selected: true},
+            'Select a target trace first',
           ),
-        ),
-    ];
+    );
+  }
+
+  private renderSyncModeSelector(trace: TraceFileAnalyzed) {
+    return this.renderDetailRow(
+      'Sync Mode',
+      m(Switch, {
+        label: 'Automatic',
+        labelLeft: 'Manual',
+        checked: trace.syncMode === 'AUTOMATIC',
+        onchange: (e: Event) => {
+          const target = e.target as HTMLInputElement;
+          trace.syncMode = target.checked ? 'AUTOMATIC' : 'MANUAL';
+          this.controller.recomputeSync();
+        },
+      }),
+    );
   }
 
   private renderActions() {

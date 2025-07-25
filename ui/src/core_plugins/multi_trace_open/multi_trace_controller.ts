@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {TraceFile, ClockInfo} from './multi_trace_types';
+import {
+  ClockInfo,
+  TraceFile,
+  TraceFileAnalyzed,
+} from './multi_trace_types';
 import {WasmEngineProxy} from '../../trace_processor/wasm_engine_proxy';
 import {uuidv4} from '../../base/uuid';
 import {redrawModal} from '../../widgets/modal';
@@ -43,6 +47,7 @@ interface TraceFileWrapper {
 export class MultiTraceController {
   private wrappers: TraceFileWrapper[] = [];
   private selectedUuid?: string;
+  private syncError?: string;
 
   get traces(): ReadonlyArray<TraceFile> {
     return this.wrappers.map((x) => x.trace);
@@ -61,7 +66,8 @@ export class MultiTraceController {
       },
     }));
     this.wrappers.push(...newTraces);
-    await Promise.all(this.wrappers.map((trace) => this.analyzeTrace(trace)));
+    await Promise.all(newTraces.map((trace) => this.analyzeTrace(trace)));
+    this.recomputeSync();
     redrawModal();
   }
 
@@ -77,7 +83,44 @@ export class MultiTraceController {
     if (this.selectedUuid === uuid) {
       this.selectedUuid = undefined;
     }
+    this.recomputeSync();
     redrawModal();
+  }
+
+  recomputeSync() {
+    this.syncError = undefined;
+
+    const analyzedTraces = this.wrappers
+      .map(({trace}) => trace)
+      .filter((trace): trace is TraceFileAnalyzed => {
+        return trace.status === 'analyzed';
+      });
+
+    const manualTraces = analyzedTraces.filter(
+      (trace) => trace.syncMode === 'MANUAL',
+    );
+    const automaticTraces = analyzedTraces.filter(
+      (trace) => trace.syncMode === 'AUTOMATIC',
+    );
+
+    // Validate manual configurations
+    const manualRoots = manualTraces.filter(
+      (trace) => trace.syncConfig.syncMode === 'ROOT',
+    );
+
+    if (manualRoots.length > 1) {
+      this.syncError = 'Multiple manual root traces are not allowed.';
+      return;
+    }
+
+    // TODO: Implement automatic sync logic here for 'automaticTraces'
+    // using 'manualTraces' as constraints.
+    console.log(
+      'Recomputing sync with:',
+      manualTraces,
+      automaticTraces,
+      this.syncError,
+    );
   }
 
   private async analyzeTrace(wrapper: TraceFileWrapper) {
